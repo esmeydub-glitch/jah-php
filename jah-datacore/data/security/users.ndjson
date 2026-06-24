@@ -1,0 +1,3 @@
+{"id":"172f90f906f32a06d194d3bbcf535cc3","username":"testadmin","password_hash":"$2y$12$I38kZQddDcjDLjJNPWToje9CeregXuz1hoW6zXO/M/B6UhtCEQ2c6","roles":["admin"],"created_at":1782224663,"last_login":null}
+{"id":"0cc98ea3e914da5e3d46a788a053d1d3","username":"newuser","password_hash":"$2y$12$I91nH9ZjR/ei50hA370tu.IjRXCVEQA9SmR770AuKRE2qoN3U6Rj6","roles":["user"],"created_at":1782224711,"last_login":1782224712}
+{"id":"6158dc3aff4f32f96f772f7d3ab5ac25","username":"admin","password_hash":"$2y$12$Usri23sImch0jLR7L3Y.2OmufwVnpoG7T/n82dFnwE5i7qz0OBuCW","roles":["admin"],"created_at":1782225007,"last_login":null}

@@ -1,0 +1,23 @@
+{
+    "name": "jah/datacore",
+    "description": "NoSQL database engine en PHP puro sin SQL ni dependencias externas",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Jah\\DataCore\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Jah\\DataCore\\Test\\": "tests/"
+        }
+    },
+    "require": {
+        "php": ">=8.2"
+    },
+    "scripts": {
+        "test": "php tests/run.php",
+        "benchmark": "php benchmarks/real.php"
+    }
+}
