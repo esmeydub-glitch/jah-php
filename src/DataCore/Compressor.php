@@ -1,0 +1,71 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Jah\DataCore;
+
+/**
+ * Compressor - Compresión LZ4/ZSTD para archivos
+ */
+final class Compressor
+{
+    public static function compress(string $data, string $algo = 'lz4'): string
+    {
+        return match ($algo) {
+            'lz4' => function_exists('lzcompress')
+                ? lzcompress($data)
+                : self::jsonCompact($data),
+            'zstd' => function_exists('zstd_compress')
+                ? zstd_compress($data)
+                : self::jsonCompact($data),
+            'gzip' => gzencode($data),
+            default => $data,
+        };
+    }
+
+    public static function decompress(string $data, string $algo = 'lz4'): string
+    {
+        return match ($algo) {
+            'lz4' => function_exists('lzuncompress')
+                ? lzuncompress($data)
+                : $data,
+            'zstd' => function_exists('zstd_decompress')
+                ? zstd_decompress($data)
+                : $data,
+            'gzip' => gzdecode($data),
+            default => $data,
+        };
+    }
+
+    private static function jsonCompact(string $json): string
+    {
+        // Compact JSON sin espacios
+        return json_encode(json_decode($json)) ?: $json;
+    }
+
+    public static function compressFile(string $input, string $output, string $algo = 'gzip'): bool
+    {
+        $content = file_get_contents($input);
+        if ($content === false) {
+            return false;
+        }
+
+        $compressed = self::compress($content, $algo);
+        $bytes = file_put_contents($output, $compressed);
+
+        return $bytes !== false;
+    }
+
+    public static function decompressFile(string $input, string $output, string $algo = 'gzip'): bool
+    {
+        $content = file_get_contents($input);
+        if ($content === false) {
+            return false;
+        }
+
+        $decompressed = self::decompress($content, $algo);
+        $bytes = file_put_contents($output, $decompressed);
+
+        return $bytes !== false;
+    }
+}
