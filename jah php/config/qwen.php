@@ -1,6 +1,6 @@
 <?php
 
 return [
-    'api_key' => 'sk-ws-H.IXPREE.****sxZPmrk3UdWKQtA',
+    'api_key' => 'APY KEY',
     'model' => 'qwen-max',
 ];
