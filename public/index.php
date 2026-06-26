@@ -28,6 +28,8 @@ $statsData = null;
 $contextPreview = '';
 $memoryResults = [];
 $actionsTrace = [];
+$classificationResult = [];
+$storedResult = [];
 
 switch ($action) {
     case 'save':
@@ -77,6 +79,8 @@ switch ($action) {
             $contextPreview = (string)($result['context_preview'] ?? '');
             $memoryResults = is_array($result['memories'] ?? null) ? $result['memories'] : [];
             $actionsTrace = is_array($result['actions_trace'] ?? null) ? $result['actions_trace'] : [];
+            $classificationResult = is_array($result['classification'] ?? null) ? $result['classification'] : [];
+            $storedResult = is_array($result['stored'] ?? null) ? $result['stored'] : [];
         }
         break;
 }
@@ -155,6 +159,14 @@ function brief(mixed $value, int $length = 220): string {
     <?php if ($response !== ''): ?>
     <h2>Respuesta Qwen / Qwen response</h2>
     <div class="response"><?= nl2br(e($response)) ?></div>
+
+    <h2>Decisión de memoria / Memory decision</h2>
+    <div class="item">
+        <strong>Guardar / Store:</strong> <?= e(($classificationResult['store'] ?? false) ? 'sí / yes' : 'no') ?><br>
+        <strong>Tipo / Type:</strong> <?= e($classificationResult['type'] ?? 'N/A') ?><br>
+        <strong>Razón / Reason:</strong> <?= e($classificationResult['reason'] ?? 'N/A') ?><br>
+        <strong>Resultado de guardado / Store result:</strong> <?= e(json_encode($storedResult, JSON_UNESCAPED_UNICODE)) ?>
+    </div>
 
     <h2>Memorias recuperadas / Retrieved memories (<?= count($memoryResults) ?>)</h2>
     <?php if ($memoryResults === []): ?>

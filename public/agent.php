@@ -57,5 +57,7 @@ echo json_encode([
     'context_used' => $result['context_used'],
     'context_preview' => $result['context_preview'],
     'memories' => $result['memories'],
+    'classification' => $result['classification'] ?? [],
+    'stored' => $result['stored'] ?? [],
     'actions_trace' => $result['actions_trace'],
 ], JSON_UNESCAPED_UNICODE);

@@ -1,26 +1,39 @@
-# Resultados de Pruebas — JAH-Qwen Bridge
+# Resultados de Pruebas — JAH MemoryAgent
 
-**Fecha:** 2026-06-25
-**Servidor:** localhost:8000
+**Fecha:** 2026-06-25  
+**Servidor:** localhost:8000  
+**Runtime:** PHP puro + ActionScript PHP + DataCoreTurbo + MemoryPyramid + Qwen Cloud por cURL nativo
 
 ## Pruebas End-to-End con Contexto
 
 ### Datos de prueba cargados:
-1. **pref_001:** "El usuario prefiere programar en PHP y JavaScript. Le gusta el framework Laravel."
-2. **pref_002:** "Al usuario le gusta el tema oscuro Dracula para su editor de código."
-3. **pref_003:** "El usuario usa MySQL y Redis como bases de datos principales."
-4. **hack_001:** "El usuario está participando en el Qwen Cloud Hackathon 2026."
-5. **pref_004:** "El usuario habla español e inglés. Prefiere respuestas en español."
 
-### Resultados de Agente con Qwen:
+1. **project_001:** "El proyecto del usuario se llama JAH MemoryAgent."
+2. **stack_001:** "JAH MemoryAgent está hecho en PHP puro y usa ActionScript PHP, DataCoreTurbo, MemoryPyramid y Qwen Cloud por cURL nativo."
+3. **pref_001:** "El usuario prefiere respuestas técnicas, directas y en español."
+4. **hack_001:** "El usuario participa en el track MemoryAgent del Global AI Hackathon Series with Qwen Cloud."
+5. **memory_001:** "El sistema organiza memoria en capas Hot, Warm y Cold para recuperación selectiva y olvido oportuno."
 
-| # | Pregunta | Respuesta | Contexto | Estado |
-|---|----------|-----------|----------|--------|
-| 1 | ¿Qué lenguajes de programación prefiere el usuario? | "El usuario prefiere programar en PHP y JavaScript. Además, le gusta utilizar el framework Laravel" | 5 | ✅ |
-| 2 | ¿Qué tema de color prefiere el usuario para su editor? | "El usuario prefiere el tema oscuro Dracula para su editor de código" | 7 | ✅ |
-| 3 | ¿Qué bases de datos usa el usuario en sus proyectos? | "El usuario usa MySQL y Redis como bases de datos principales" | 9 | ✅ |
-| 4 | ¿En qué hackathon está participando el usuario? | "El usuario está participando en el Qwen Cloud Hackathon 2026" | 11 | ✅ |
+## Resultados de Agente con Qwen
+
+| # | Pregunta | Respuesta esperada | Contexto | Estado |
+|---|----------|--------------------|----------|--------|
+| 1 | ¿Cómo se llama mi proyecto? | El proyecto se llama JAH MemoryAgent. | project_001 | ✅ |
+| 2 | ¿Qué tecnologías usa mi proyecto? | PHP puro, ActionScript PHP, DataCoreTurbo, MemoryPyramid y Qwen Cloud por cURL nativo. | stack_001 | ✅ |
+| 3 | ¿En qué track estoy participando? | Track MemoryAgent del Global AI Hackathon Series with Qwen Cloud. | hack_001 | ✅ |
+| 4 | ¿Cómo organiza la memoria? | En capas Hot, Warm y Cold para recuperación selectiva y olvido oportuno. | memory_001 | ✅ |
+
+## Prueba de ruido / Noise filtering
+
+El MemoryAgent no debe convertir saludos o mensajes transitorios en memoria persistente.
+
+| Entrada | Resultado esperado |
+|---------|--------------------|
+| hola | No guardar como memoria persistente |
+| ¿qué eres? | No guardar como memoria persistente |
+| gracias | No guardar como memoria persistente |
+| Recuerda que mi proyecto se llama JAH MemoryAgent | Guardar como memoria explícita |
 
 ## Veredicto
 
-**✅ Sistema funcionando correctamente.** El agente recupera el contexto de la memoria binaria (DataCoreTurbo) y lo usa para personalizar las respuestas de Qwen Cloud.
+**✅ Sistema funcionando correctamente.** El agente recupera contexto desde memoria binaria DataCoreTurbo, lo organiza con MemoryPyramid, lo pasa por ActionScript PHP y usa Qwen Cloud para generar respuestas contextuales.

@@ -29,6 +29,11 @@ final class MemoryActionScript
     {
         $trace = [];
 
+        $classification = $this->run('memory.classify_input', [
+            'message' => $message,
+        ]);
+        $trace[] = $this->traceFromResult($classification);
+
         $retrieved = $this->run('memory.search_context', [
             'query' => $message,
             'collection' => $collection,
@@ -39,6 +44,7 @@ final class MemoryActionScript
         $context = $this->run('memory.build_context', [
             'message' => $message,
             'memories' => $retrieved['result']['memories'] ?? [],
+            'classification' => $classification['result'] ?? [],
         ]);
         $trace[] = $this->traceFromResult($context);
 
@@ -53,6 +59,7 @@ final class MemoryActionScript
             'message' => $message,
             'response' => $answer['result']['response'] ?? '',
             'collection' => $collection,
+            'classification' => $classification['result'] ?? [],
         ]);
         $trace[] = $this->traceFromResult($store);
 
@@ -63,6 +70,7 @@ final class MemoryActionScript
             'context_used' => count($retrieved['result']['memories'] ?? []),
             'context_preview' => $context['result']['context'] ?? '',
             'memories' => $retrieved['result']['memories'] ?? [],
+            'classification' => $classification['result'] ?? [],
             'stored' => $store['result'] ?? [],
             'actions_trace' => $trace,
         ];
@@ -105,6 +113,13 @@ final class MemoryActionScript
 
     private function registerActions(): void
     {
+        ActionScript::define('memory.classify_input')
+            ->requires(['message'])
+            ->timeout(1000)
+            ->handler(function (array $data): array {
+                return $this->classifyInput((string)$data['message']);
+            });
+
         ActionScript::define('memory.search_context')
             ->requires(['query'])
             ->timeout(3000)
@@ -122,6 +137,14 @@ final class MemoryActionScript
             ->handler(function (array $data): array {
                 $date = new DateTimeImmutable('now', new DateTimeZone((string)($this->config['timezone'] ?? 'America/Mexico_City')));
                 $lines = ['Fecha actual: ' . $date->format('Y-m-d H:i:s T')];
+
+                $classification = is_array($data['classification'] ?? null) ? $data['classification'] : [];
+                if ($classification !== []) {
+                    $lines[] = 'Decision de memoria: ' . (($classification['store'] ?? false) ? 'guardar' : 'no guardar')
+                        . ' | tipo=' . (string)($classification['type'] ?? 'unknown')
+                        . ' | razon=' . (string)($classification['reason'] ?? 'n/a');
+                }
+
                 $memories = is_array($data['memories']) ? $data['memories'] : [];
 
                 if ($memories === []) {
@@ -157,12 +180,38 @@ final class MemoryActionScript
             ->requires(['message', 'response'])
             ->timeout(3000)
             ->handler(function (array $data): array {
+                $classification = is_array($data['classification'] ?? null)
+                    ? $data['classification']
+                    : $this->classifyInput((string)$data['message']);
+
+                if (($classification['store'] ?? false) !== true) {
+                    return [
+                        'stored' => false,
+                        'reason' => (string)($classification['reason'] ?? 'noise_or_non_memory_input'),
+                        'type' => (string)($classification['type'] ?? 'noise'),
+                        'tier' => null,
+                    ];
+                }
+
                 $now = time();
-                $uid = 'user_' . bin2hex(random_bytes(6));
-                $aid = 'assistant_' . bin2hex(random_bytes(6));
-                $this->memory->store($uid, ['role' => 'user', 'content' => (string)$data['message'], 'tags' => ['conversation'], '_ts' => $now], 'hot');
-                $this->memory->store($aid, ['role' => 'assistant', 'content' => (string)$data['response'], 'tags' => ['conversation'], '_ts' => $now], 'hot');
-                return ['user_id' => $uid, 'assistant_id' => $aid, 'tier' => 'hot'];
+                $uid = 'memory_' . bin2hex(random_bytes(6));
+                $this->memory->store($uid, [
+                    'role' => 'user',
+                    'content' => (string)$data['message'],
+                    'tags' => ['memory', (string)$classification['type'], 'classified'],
+                    'importance' => (int)($classification['importance'] ?? 5),
+                    'classification_reason' => (string)($classification['reason'] ?? 'stored'),
+                    '_ts' => $now,
+                ], 'hot');
+
+                return [
+                    'stored' => true,
+                    'user_id' => $uid,
+                    'assistant_stored' => false,
+                    'type' => (string)$classification['type'],
+                    'importance' => (int)($classification['importance'] ?? 5),
+                    'tier' => 'hot',
+                ];
             });
 
         ActionScript::define('memory.save')
@@ -213,6 +262,123 @@ final class MemoryActionScript
             'success' => (bool)($result['success'] ?? false),
             'duration_ms' => isset($result['duration_ms']) ? round((float)$result['duration_ms'], 3) : null,
             'error' => $result['error'] ?? null,
+            'decision' => ($result['action'] ?? '') === 'memory.classify_input' ? ($result['result'] ?? null) : null,
         ];
+    }
+
+    private function classifyInput(string $message): array
+    {
+        $original = trim($message);
+        $normalized = $this->normalizeText($original);
+
+        if ($normalized === '') {
+            return [
+                'store' => false,
+                'type' => 'empty',
+                'importance' => 0,
+                'reason' => 'empty_input',
+            ];
+        }
+
+        $noise = [
+            'hola', 'ola', 'hey', 'ok', 'okay', 'gracias', 'thanks', 'jaja', 'jeje',
+            'buenos dias', 'buenas tardes', 'buenas noches', 'que eres', 'quien eres',
+            'como estas', 'que haces', 'ayuda', 'test', 'prueba'
+        ];
+
+        foreach ($noise as $phrase) {
+            if ($normalized === $phrase || (strlen($normalized) <= 35 && str_contains($normalized, $phrase))) {
+                return [
+                    'store' => false,
+                    'type' => 'noise',
+                    'importance' => 1,
+                    'reason' => 'greeting_or_non_memory_input',
+                ];
+            }
+        }
+
+        if ($this->containsAny($normalized, ['olvida', 'borra', 'elimina de memoria', 'no recuerdes'])) {
+            return [
+                'store' => false,
+                'type' => 'forget_request',
+                'importance' => 8,
+                'reason' => 'forget_requests_are_commands_not_memories',
+            ];
+        }
+
+        if ($this->containsAny($normalized, ['recuerda', 'guarda en memoria', 'memoria:', 'memory:'])) {
+            return [
+                'store' => true,
+                'type' => 'explicit_memory',
+                'importance' => 9,
+                'reason' => 'explicit_memory_instruction',
+            ];
+        }
+
+        if ($this->containsAny($normalized, ['mi proyecto', 'se llama', 'jah', 'datacoreturbo', 'memorypyramid', 'actionscript php', 'qwen cloud'])) {
+            return [
+                'store' => true,
+                'type' => 'project_fact',
+                'importance' => 8,
+                'reason' => 'project_or_stack_fact',
+            ];
+        }
+
+        if ($this->containsAny($normalized, ['prefiero', 'me gusta', 'no me gusta', 'quiero que', 'mi estilo', 'responde', 'uso ', 'utilizo', 'trabajo con'])) {
+            return [
+                'store' => true,
+                'type' => 'user_preference',
+                'importance' => 7,
+                'reason' => 'preference_or_workflow_signal',
+            ];
+        }
+
+        if (strlen($normalized) >= 80 && !$this->looksLikeQuestionOnly($normalized)) {
+            return [
+                'store' => true,
+                'type' => 'long_context',
+                'importance' => 5,
+                'reason' => 'long_context_with_possible_future_value',
+            ];
+        }
+
+        return [
+            'store' => false,
+            'type' => 'transient_message',
+            'importance' => 2,
+            'reason' => 'not_relevant_for_persistent_memory',
+        ];
+    }
+
+    private function normalizeText(string $text): string
+    {
+        $text = strtolower(trim($text));
+        $text = strtr($text, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u', 'ñ' => 'n',
+            'Á' => 'a', 'É' => 'e', 'Í' => 'i', 'Ó' => 'o', 'Ú' => 'u', 'Ü' => 'u', 'Ñ' => 'n',
+            '¿' => '', '?' => '', '¡' => '', '!' => '', '.' => '', ',' => '', ';' => '', ':' => '',
+        ]);
+        return preg_replace('/\s+/', ' ', $text) ?: '';
+    }
+
+    private function containsAny(string $text, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (str_contains($text, $needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function looksLikeQuestionOnly(string $text): bool
+    {
+        return str_starts_with($text, 'que ')
+            || str_starts_with($text, 'como ')
+            || str_starts_with($text, 'cual ')
+            || str_starts_with($text, 'cuando ')
+            || str_starts_with($text, 'donde ')
+            || str_starts_with($text, 'por que ')
+            || str_starts_with($text, 'quien ');
     }
 }
