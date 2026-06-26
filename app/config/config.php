@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/environment.php';
 
+$qwenConfig = require __DIR__ . '/qwen.php';
+
 return [
     'motor' => 'JAH',
     'version' => '1.0.0',
+    'qwen' => $qwenConfig,
     'env' => (string) jah_env('JAH_ENV', 'production'),
     'timezone' => (string) jah_env('JAH_TIMEZONE', 'UTC'),
     'debug' => (bool) jah_env('JAH_DEBUG', false),

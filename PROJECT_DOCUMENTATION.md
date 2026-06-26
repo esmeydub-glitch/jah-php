@@ -2,7 +2,7 @@
 
 ## Resumen
 
-Agente de IA con memoria estratificada en PHP nativo, conectado a Qwen Cloud vía DashScope International API. El sistema usa un motor de almacenamiento binario (DataCoreTurbo) 27,700x más rápido que SQLite3.
+Agente de IA con memoria estratificada en PHP nativo, conectado a Qwen Cloud vía DashScope International API. El sistema usa un motor de almacenamiento binario (DataCoreTurbo) con benchmarks locales reproducibles.
 
 ---
 

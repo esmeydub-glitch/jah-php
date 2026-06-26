@@ -8,11 +8,12 @@ require_once $basePath . '/core/Autoloader.php';
 require_once $basePath . '/QwenConnector.php';
 
 Autoloader::register();
-Autoloader::addNamespace('Jah\\Core\\',     $basePath . '/core');
-Autoloader::addNamespace('Jah\\Agents\\',   $basePath . '/agents');
-Autoloader::addNamespace('Jah\\Memory\\',   $basePath . '/memory');
-Autoloader::addNamespace('Jah\\DataCore\\', dirname($basePath) . '/jah-datacore/src');
-
+Autoloader::addNamespace('Jah\\Core\\',       $basePath . '/core');
+Autoloader::addNamespace('Jah\\Agents\\',     $basePath . '/agents');
+Autoloader::addNamespace('Jah\\Memory\\',     $basePath . '/memory');
+Autoloader::addNamespace('Jah\\DataCore\\',   dirname($basePath) . '/jah-datacore/src');
+Autoloader::addNamespace('Jah\\Network\\',    $basePath . '/network');
+Autoloader::addNamespace('Jah\\Cache\\',      $basePath . '/cache');
 use Jah\DataCore\DataCoreTurbo;
 use Jah\DataCore\MemoryPyramid;
 
@@ -99,12 +100,9 @@ $qwenConfigFile = $basePath . '/config/qwen.php';
 $configApiKey = '';
 $configModel = 'qwen-max';
 if (is_file($qwenConfigFile) && is_readable($qwenConfigFile)) {
-    $content = file_get_contents($qwenConfigFile);
-    $content = preg_replace('/^<\?php/', '', $content);
-    $content = preg_replace('/\?>$/', '', $content);
-    $qwenConfig = eval($content);
+    $qwenConfig = require $qwenConfigFile;
     if (is_array($qwenConfig)) {
-        $configApiKey = $qwenConfig['api_key'] ?? '';
+        $configApiKey = $qwenConfig["api_key"] ?? "";
         $configModel = $qwenConfig['model'] ?? 'qwen-max';
     }
 }

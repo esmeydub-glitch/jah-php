@@ -23,8 +23,8 @@ ALL TESTS PASSED
 
 | Operación | DataCore Lightning | SQLite3 | Factor |
 |---|---|---|---|
-| 1k inserts | 0.72 ms (1,391,833/s) | 19,922 ms (50/s) | **27,700x** |
-| 5k inserts | 4.45 ms (1,123,513/s) | 95,356 ms (52/s) | **21,400x** |
+| 1k inserts | 0.72 ms (1,391,833/s) | 19,922 ms (50/s) | **local benchmark** |
+| 5k inserts | 4.45 ms (1,123,513/s) | 95,356 ms (52/s) | local benchmark |
 | 10k inserts | 5.25 ms (1,903,966/s) | 120+ segundos (timeout) | **22,000x+** |
 
 ## Benchmark: WAL Transactions ACID

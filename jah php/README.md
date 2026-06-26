@@ -2,7 +2,7 @@
 
 El **Motor PHP JAH** es un cerebro web y enrutador de eventos distribuido y desacoplado, estructurado en **12 Fases** de operación asistidas por **11 Agentes Especializados**. 
 
-PHP se desempeña aquí como la puerta de enlace, control y enrutamiento rápido, mientras que la base de datos MySQL provee memoria persistente e histórico de decisiones para optimizar el rendimiento.
+PHP se desempeña aquí como la puerta de enlace, control y enrutamiento rápido. Para el hackathon MemoryAgent, la memoria persistente principal vive en DataCoreTurbo y MemoryPyramid con ActionScript PHP; MySQL queda como módulo legacy opcional, no requerido.
 
 ---
 
@@ -24,7 +24,7 @@ jah php/
 ├── agents/
 │   ├── BaseAgent.php            # Interfaz base y ciclo de vida de los agentes
 │   ├── GatewayAgent.php         # FASE 1 — Validación de datos externos
-│   ├── MemoryAgent.php          # FASE 2 — Persistencia y consulta en MySQL
+│   ├── MemoryAgent.php          # FASE 2 — Persistencia DataCoreTurbo + MemoryPyramid
 │   ├── ObserverAgent.php        # FASE 3 — Monitoreo de CPU/RAM/Disco
 │   ├── PredictorAgent.php       # FASE 4 — Predicción de carga y estrategias
 │   ├── OrchestratorAgent.php    # FASE 5 — Fraccionador y delegador de tareas
@@ -74,7 +74,7 @@ Cuando un evento ingresa al motor, sigue la siguiente ruta:
   [FASE 10] AnalystAgent (Reporta rendimiento del Job)
                    │
                    ▼
-  [FASE 2] MemoryAgent (Persiste trazas en MySQL)
+  [FASE 2] MemoryAgent (DataCoreTurbo + MemoryPyramid)
                    │
                    ▼
   [FASE 11] OptimizerAgent (Analiza fallos y recomienda)
@@ -88,15 +88,11 @@ Cuando un evento ingresa al motor, sigue la siguiente ruta:
 ## 🚀 Cómo Empezar
 
 ### Requisitos
-* PHP 8.0 o superior con extensión `curl` y `pdo_mysql`.
-* MySQL o MariaDB (opcional para simulación inicial, obligatorio para persistencia).
+* PHP 8.1 o superior con extensión `curl`.
+* Sin MySQL obligatorio: DataCoreTurbo es la persistencia principal del MemoryAgent. MySQL/PDO es legacy opcional.
 
-### 1. Inicializar Base de Datos (Opcional)
-Importa el archivo [schema.sql](file:///home/salkesme/Documentos/jah/jah%20php/memory/schema.sql) en tu servidor local de base de datos MySQL:
-```bash
-mysql -u tu_usuario -p < memory/schema.sql
-```
-Ajusta las credenciales de conexión en [config/database.php](file:///home/salkesme/Documentos/jah/jah%20php/config/database.php).
+### 1. Memoria principal DataCoreTurbo/MemoryPyramid
+La demo principal no requiere base de datos externa. La memoria se crea automáticamente en runtime/memory al ejecutar public/index.php o public/api.php.
 
 ### 2. Simular Flujo Completo por Consola (CLI)
 Para correr una simulación predefinida del flujo completo del motor (Observer -> Gateway -> Predictor -> Orchestrator -> Workers -> Finalización):

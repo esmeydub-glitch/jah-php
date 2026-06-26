@@ -5,62 +5,72 @@ declare(strict_types=1);
 namespace Jah\DataCore;
 
 /**
- * Tres niveles de memoria para DataCore:
- * - Caliente (hot): LRU en RAM, 10k entries
- * - Tibia (warm): Archivo ndjson reciente, 100k entries
- * - Fría (cold): Archivos históricos comprimidos
+ * MemoryPyramid
+ * Pure PHP Hot / Warm / Cold memory lifecycle for JAH MemoryAgent.
+ * - Hot: in-request LRU cache
+ * - Warm: persistent NDJSON with file+offset index
+ * - Cold: compressed historical files
  */
 final class MemoryPyramid
 {
     private string $basePath;
-    private CacheAgent $hotCache;   // Memoria caliente
-    private WarmMemory $warmCache;  // Memoria tibia
-    private ColdMemory $coldStorage; // Memoria fría
+    private CacheAgent $hotCache;
+    private WarmMemory $warmCache;
+    private ColdMemory $coldStorage;
 
     public function __construct(string $basePath)
     {
-        $this->basePath = $basePath;
+        $this->basePath = rtrim($basePath, '/');
+        if (!is_dir($this->basePath)) {
+            mkdir($this->basePath, 0700, true);
+        }
         $this->hotCache = new CacheAgent(10000);
-        $this->warmCache = new WarmMemory($basePath . '/warm');
-        $this->coldStorage = new ColdMemory($basePath . '/cold');
+        $this->warmCache = new WarmMemory($this->basePath . '/warm');
+        $this->coldStorage = new ColdMemory($this->basePath . '/cold');
     }
 
     public function get(string $key): mixed
     {
-        // 1. Hot cache (RAM)
         $val = $this->hotCache->get($key);
         if ($val !== null) {
             return $val;
         }
 
-        // 2. Warm cache (reciente en disco)
         $val = $this->warmCache->get($key);
         if ($val !== null) {
-            $this->hotCache->set($key, $val); // Promote to hot
+            $this->hotCache->set($key, $val);
             return $val;
         }
 
-        // 3. Cold storage (histórico comprimido)
-        return $this->coldStorage->get($key);
+        $val = $this->coldStorage->get($key);
+        if ($val !== null) {
+            $this->hotCache->set($key, $val);
+        }
+
+        return $val;
     }
 
     public function set(string $key, mixed $value, int $ttl = 0): void
     {
         $this->hotCache->set($key, $value);
         $this->warmCache->set($key, $value);
-        
-        // Promote to cold after TTL expiry
+
         if ($ttl > 0) {
             $this->coldStorage->schedule($key, $value, time() + $ttl);
         }
+    }
+
+    public function flushCold(): void
+    {
+        $this->coldStorage->flush();
     }
 
     public function stats(): array
     {
         return [
             'hot_entries' => count($this->hotCache->getAll()),
-            'warm_files' => count(glob($this->warmCache->getPath() . '/*.json')),
-            'cold_files' => count(glob($this->coldStorage->getPath() . '/*.json.gz')),
+            'warm_files' => count(glob($this->warmCache->getPath() . '/*.ndjson') ?: []),
+            'cold_files' => count(glob($this->coldStorage->getPath() . '/*.json.gz') ?: []),
         ];
     }
 }
@@ -72,9 +82,9 @@ class WarmMemory
 
     public function __construct(string $path)
     {
-        $this->path = $path;
-        if (!is_dir($path)) {
-            mkdir($path, 0700, true);
+        $this->path = rtrim($path, '/');
+        if (!is_dir($this->path)) {
+            mkdir($this->path, 0700, true);
         }
     }
 
@@ -86,45 +96,62 @@ class WarmMemory
         }
 
         [$file, $offset] = $idx[$key];
+        if (!is_file($file)) {
+            return null;
+        }
+
         $handle = fopen($file, 'r');
-        fseek($handle, $offset);
+        if ($handle === false) {
+            return null;
+        }
+        fseek($handle, (int)$offset);
         $line = fgets($handle);
         fclose($handle);
 
-        return json_decode($line, true)['payload'] ?? null;
+        $record = $line !== false ? json_decode($line, true) : null;
+        return is_array($record) ? ($record['payload'] ?? null) : null;
     }
 
     public function set(string $key, mixed $value): void
     {
         $file = $this->path . '/warm_' . date('Ymd') . '.ndjson';
-        $offset = filesize($file) ?: 0;
-        
-        file_put_contents($file, json_encode(['key' => $key, 'payload' => $value]) . "\n", FILE_APPEND);
-        
-        // Update index in memory
+        $offset = is_file($file) ? (int)filesize($file) : 0;
+        $record = json_encode(['key' => $key, 'payload' => $value], JSON_UNESCAPED_UNICODE);
+        if ($record === false) {
+            return;
+        }
+
+        file_put_contents($file, $record . "\n", FILE_APPEND | LOCK_EX);
+
         $this->index[$key] = [$file, $offset];
-        file_put_contents(
-            $this->path . '/.index', 
-            "{$key}:{$offset}\n", 
-            FILE_APPEND
-        );
+        $encodedFile = str_replace(':', '%3A', $file);
+        file_put_contents($this->path . '/.index', "{$key}:{$encodedFile}:{$offset}\n", FILE_APPEND | LOCK_EX);
     }
 
     private function buildIndex(): array
     {
-        if (!empty($this->index)) {
+        if ($this->index !== []) {
             return $this->index;
         }
 
         $indexFile = $this->path . '/.index';
-        if (file_exists($indexFile)) {
-            foreach (file($indexFile) as $line) {
-                $parts = explode(':', trim($line));
-                if (count($parts) >= 2) {
-                    $this->index[$parts[0]] = [$this->path . '/warm_' . date('Ymd') . '.ndjson', (int) $parts[1]];
-                }
+        if (!is_file($indexFile)) {
+            return $this->index;
+        }
+
+        foreach (file($indexFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+            $parts = explode(':', $line);
+            if (count($parts) >= 3) {
+                $key = array_shift($parts);
+                $offset = (int)array_pop($parts);
+                $file = str_replace('%3A', ':', implode(':', $parts));
+                $this->index[$key] = [$file, $offset];
+            } elseif (count($parts) === 2) {
+                // Backward compatibility with old index format.
+                $this->index[$parts[0]] = [$this->path . '/warm_' . date('Ymd') . '.ndjson', (int)$parts[1]];
             }
         }
+
         return $this->index;
     }
 
@@ -141,18 +168,26 @@ class ColdMemory
 
     public function __construct(string $path)
     {
-        $this->path = $path;
-        if (!is_dir($path)) {
-            mkdir($path, 0700, true);
+        $this->path = rtrim($path, '/');
+        if (!is_dir($this->path)) {
+            mkdir($this->path, 0700, true);
         }
     }
 
     public function get(string $key): mixed
     {
-        foreach (glob($this->path . '/*.json.gz') as $file) {
-            $decompressed = Compressor::decompressFile($file, sys_get_temp_dir() . '/tmp.json');
-            $data = json_decode(file_get_contents(sys_get_temp_dir() . '/tmp.json'), true);
-            if ($data && isset($data[$key])) {
+        foreach (glob($this->path . '/*.json.gz') ?: [] as $file) {
+            $tmp = tempnam(sys_get_temp_dir(), 'jah_cold_');
+            if ($tmp === false) {
+                continue;
+            }
+
+            $ok = Compressor::decompressFile($file, $tmp, 'gzip');
+            $raw = $ok ? file_get_contents($tmp) : false;
+            @unlink($tmp);
+
+            $data = $raw !== false ? json_decode($raw, true) : null;
+            if (is_array($data) && array_key_exists($key, $data)) {
                 return $data[$key];
             }
         }
@@ -162,7 +197,7 @@ class ColdMemory
     public function schedule(string $key, mixed $value, int $expire): void
     {
         $this->queue[] = ['key' => $key, 'value' => $value, 'expire' => $expire];
-        
+
         if (count($this->queue) > 5000) {
             $this->flush();
         }
@@ -171,23 +206,27 @@ class ColdMemory
     public function flush(): void
     {
         $now = time();
-        $expired = array_filter($this->queue, fn($item) => $item['expire'] <= $now);
-        
-        if (empty($expired)) {
+        $expired = array_filter($this->queue, static fn(array $item): bool => (int)$item['expire'] <= $now);
+
+        if ($expired === []) {
             return;
         }
 
         $data = [];
         foreach ($expired as $item) {
-            $data[$item['key']] = $item['value'];
+            $data[(string)$item['key']] = $item['value'];
         }
 
-        $file = $this->path . '/cold_' . time() . '.json.gz';
-        $compressed = Compressor::compress(json_encode($data), 'gzip');
-        file_put_contents($file, $compressed);
+        $json = json_encode($data, JSON_UNESCAPED_UNICODE);
+        if ($json !== false) {
+            $file = $this->path . '/cold_' . time() . '_' . bin2hex(random_bytes(3)) . '.json.gz';
+            file_put_contents($file, Compressor::compress($json, 'gzip'), LOCK_EX);
+        }
 
-        // Remove flushed items
-        $this->queue = array_diff_key($this->queue, $expired);
+        $this->queue = array_values(array_filter(
+            $this->queue,
+            static fn(array $item): bool => (int)$item['expire'] > $now
+        ));
     }
 
     public function getPath(): string

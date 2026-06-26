@@ -1,44 +1,34 @@
-# JAH DataCore - NoSQL Database Engine
+# JAH DataCore - Pure PHP Memory Engine
 
-Motor NoSQL 100% PHP sin SQL ni dependencias externas. **27,700x más rápido que SQLite3** en inserciones.
+Motor NoSQL 100% PHP sin SQL ni dependencias externas. Incluye benchmarks locales reproducibles para comparar escritura binaria append-only.
 
-## Benchmark Results
+## Runtime
 
-| Test | DataCore Lightning | SQLite3 | Factor |
-|---|---|---|---|
-| 1k inserts | 0.72 ms (1.4M/s) | 19,922 ms (50/s) | 27,700x |
-| 5k inserts | 4.45 ms (1.1M/s) | 95,356 ms (52/s) | 21,400x |
-| 1k ACID tx | 47 ms | 13,261 ms | 281x |
+No usa Composer para la demo del hackathon. La carga se hace con `require_once` y el autoloader manual de JAH.
 
-## Instalación
+## Formato
 
-```bash
-composer install
-```
-
-Sin Composer:
-```php
-require_once 'vendor/autoload.php';
+```text
+[4 bytes length][JSON payload][newline]
 ```
 
 ## Uso
 
 ```php
-use Jah\DataCore\DataCoreLightning;
+require_once __DIR__ . '/../src/DataCore/DataCoreTurbo.php';
 
-$db = DataCoreLightning::open('/tmp/datacore');
-$db->insert('users', ['id' => 'u1', 'name' => 'Alice', 'age' => 30]);
+use Jah\DataCore\DataCoreTurbo;
+
+$db = new DataCoreTurbo('/tmp/datacore');
+$db->insert('memories', ['id' => 'm1', 'content' => 'Jah-PHP memory']);
+$memory = $db->find('memories', 'm1');
 $db->close();
 ```
 
 ## Tests
 
+Los tests del proyecto se ejecutan con PHP CLI puro.
+
 ```bash
 php tests/run.php
 ```
-
-✅ 6/6 tests passed
-
-## License
-
-MIT

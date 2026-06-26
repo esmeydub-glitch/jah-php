@@ -12,24 +12,22 @@ runtime/
 *.gz
 *.log
 
-# OS
+# Local/editor files
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.swp
 
-# Python
+# Python is not part of this project
 __pycache__/
+*.py
 *.pyc
 *.egg-info/
 .eggs/
 dist/
 build/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-
-# Old structure (deprecated)
-jah-php/
-jah php/config/qwen.php
-app/config/qwen.php
+# Packaged archives
+*.tar.gz
+*.zip

@@ -4,7 +4,7 @@
 
 1. Inmutabilidad: Configuración después de definición no modifica instancia
 2. Fibers: Para timeout sin forks
-3. Streams: Reactivo a eventos similares a Node.js
+3. Streams: Reactivo a eventos con streams PHP puro
 4. Event loop: Simple scheduler integrado
 
 ## Clases principales

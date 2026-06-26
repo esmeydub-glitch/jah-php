@@ -11,7 +11,8 @@ Autoloader::addNamespace('Jah\\Core\\',       $basePath . '/core');
 Autoloader::addNamespace('Jah\\Agents\\',     $basePath . '/agents');
 Autoloader::addNamespace('Jah\\Memory\\',     $basePath . '/memory');
 Autoloader::addNamespace('Jah\\DataCore\\',   dirname($basePath) . '/jah-datacore/src');
-
+Autoloader::addNamespace('Jah\\Network\\',    $basePath . '/network');
+Autoloader::addNamespace('Jah\\Cache\\',      $basePath . '/cache');
 use Jah\Core\JahEngine;
 use Jah\DataCore\DataCoreTurbo;
 use Jah\DataCore\MemoryPyramid;

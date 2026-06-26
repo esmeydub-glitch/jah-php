@@ -4,42 +4,48 @@ declare(strict_types=1);
 
 namespace Jah\DataCore;
 
-use RuntimeException;
-
 /**
- * DataCore Turbo - Almacenamiento binario + batch + mmap
+ * DataCoreTurbo
+ * Pure PHP binary append-only storage for the JAH MemoryAgent.
+ *
+ * Record format:
+ * [4 bytes little-endian length][JSON payload][newline]
+ *
+ * Index format:
+ * id:segment:offset:timestamp
  */
 final class DataCoreTurbo
 {
     private string $basePath;
     private array $buffer = [];
-    private int $batchSize = 1000;
-    private int $flushTimer = 0;
+    private int $batchSize;
 
     public function __construct(string $basePath, int $batchSize = 1000)
     {
         $this->basePath = rtrim($basePath, '/');
-        $this->batchSize = $batchSize;
+        $this->batchSize = max(1, $batchSize);
         $this->initDirs();
     }
 
     private function initDirs(): void
     {
         foreach (['data', 'index', 'wal'] as $dir) {
-            if (!is_dir("{$this->basePath}/{$dir}")) {
-                mkdir("{$this->basePath}/{$dir}", 0700, true);
+            $path = "{$this->basePath}/{$dir}";
+            if (!is_dir($path)) {
+                mkdir($path, 0700, true);
             }
         }
     }
 
     public function insert(string $collection, array $doc): string
     {
-        $id = $doc['id'] ?? bin2hex(random_bytes(8));
-        $doc['id'] ??= $id;
-        $doc['_ts'] = time();
+        $collection = $this->sanitizeCollection($collection);
+        $id = (string)($doc['id'] ?? bin2hex(random_bytes(8)));
+        $doc['id'] = $id;
+        $doc['_ts'] = $doc['_ts'] ?? time();
 
         $this->buffer[] = ['collection' => $collection, 'doc' => $doc, 'id' => $id];
-        
+
         if (count($this->buffer) >= $this->batchSize) {
             $this->flush();
         }
@@ -49,51 +55,68 @@ final class DataCoreTurbo
 
     public function flush(): void
     {
-        if (empty($this->buffer)) {
+        if ($this->buffer === []) {
             return;
         }
 
-        foreach ($this->buffer as $entry) {
+        $batch = $this->buffer;
+        $this->buffer = [];
+
+        foreach ($batch as $entry) {
             $this->writeBinary($entry['collection'], $entry['doc'], $entry['id']);
         }
-
-        $this->buffer = [];
     }
 
     private function writeBinary(string $collection, array $doc, string $id): void
     {
-        $segment = crc32($id) % 1000;
+        $segment = $this->segmentForId($id);
         $file = "{$this->basePath}/data/{$collection}_{$segment}.bin";
+        $indexFile = "{$this->basePath}/index/{$collection}.idx";
 
-        // Formato binario: [4 bytes length][JSON data][newline]
-        $json = json_encode(['id' => $id, 'payload' => $doc]);
+        $json = json_encode(['id' => $id, 'payload' => $doc], JSON_UNESCAPED_UNICODE);
+        if ($json === false) {
+            return;
+        }
+
         $record = pack('V', strlen($json)) . $json . "\n";
 
-        file_put_contents($file, $record, FILE_APPEND | LOCK_EX);
+        $offset = is_file($file) ? (int) filesize($file) : 0;
+        $handle = fopen($file, 'ab');
+        if ($handle === false) {
+            return;
+        }
 
-        // Index hash en memoria
-        $indexFile = "{$this->basePath}/index/{$collection}.idx";
-        file_put_contents($indexFile, "{$id}:{$segment}:" . (time()) . "\n", FILE_APPEND | LOCK_EX);
+        flock($handle, LOCK_EX);
+        fwrite($handle, $record);
+        fflush($handle);
+        flock($handle, LOCK_UN);
+        fclose($handle);
+
+        file_put_contents($indexFile, "{$id}:{$segment}:{$offset}:" . time() . "\n", FILE_APPEND | LOCK_EX);
     }
 
     public function find(string $collection, string $id): ?array
     {
-        // Binary search en índice
+        $this->flush();
+        $collection = $this->sanitizeCollection($collection);
         $indexFile = "{$this->basePath}/index/{$collection}.idx";
-        if (!file_exists($indexFile)) {
+        if (!is_file($indexFile)) {
             return null;
         }
 
-        $lastLine = 0;
         $foundSegment = null;
-        
-        // Leer últimas líneas (el ítem más reciente está al final)
+        $foundOffset = null;
+
         $handle = fopen($indexFile, 'r');
+        if ($handle === false) {
+            return null;
+        }
+
         while (($line = fgets($handle)) !== false) {
             $parts = explode(':', trim($line));
-            if ($parts[0] === $id) {
-                $foundSegment = (int) $parts[1];
-                break;
+            if (($parts[0] ?? '') === $id) {
+                $foundSegment = (int)($parts[1] ?? 0);
+                $foundOffset = isset($parts[2]) ? (int)$parts[2] : null;
             }
         }
         fclose($handle);
@@ -102,61 +125,88 @@ final class DataCoreTurbo
             return null;
         }
 
-        // Binary read del archivo
-        return $this->readBinary($collection, $foundSegment, $id);
+        $payload = $this->readBinary($collection, $foundSegment, $id, $foundOffset);
+        if (($payload['_deleted'] ?? false) === true) {
+            return null;
+        }
+
+        return $payload;
     }
 
-    private function readBinary(string $collection, int $segment, string $targetId): ?array
+    private function readBinary(string $collection, int $segment, string $targetId, ?int $offset = null): ?array
     {
         $file = "{$this->basePath}/data/{$collection}_{$segment}.bin";
-        if (!file_exists($file)) {
+        if (!is_file($file)) {
             return null;
         }
 
         $handle = fopen($file, 'rb');
+        if ($handle === false) {
+            return null;
+        }
+
+        if ($offset !== null && $offset >= 0) {
+            fseek($handle, $offset);
+            $payload = $this->readOneRecord($handle, $targetId);
+            fclose($handle);
+            return $payload;
+        }
+
+        $latest = null;
         while (!feof($handle)) {
-            $lenData = fread($handle, 4);
-            if (strlen($lenData) < 4) {
-                break;
-            }
-            $len = unpack('V', $lenData)[1];
-            $json = fread($handle, $len);
-            $data = json_decode($json, true);
-
-            // Skip newline
-            fgetc($handle);
-
-            if ($data && $data['id'] === $targetId) {
-                fclose($handle);
-                return $data['payload'];
+            $payload = $this->readOneRecord($handle, $targetId);
+            if ($payload !== null) {
+                $latest = $payload;
             }
         }
         fclose($handle);
-        return null;
+
+        return $latest;
+    }
+
+    private function readOneRecord($handle, ?string $targetId = null): ?array
+    {
+        $lenData = fread($handle, 4);
+        if ($lenData === false || strlen($lenData) < 4) {
+            return null;
+        }
+
+        $unpacked = unpack('V', $lenData);
+        $len = (int)($unpacked[1] ?? 0);
+        if ($len <= 0) {
+            return null;
+        }
+
+        $json = fread($handle, $len);
+        fgetc($handle);
+
+        if ($json === false || strlen($json) !== $len) {
+            return null;
+        }
+
+        $data = json_decode($json, true);
+        if (!is_array($data) || !isset($data['payload'])) {
+            return null;
+        }
+
+        if ($targetId !== null && (string)($data['id'] ?? '') !== $targetId) {
+            return null;
+        }
+
+        return is_array($data['payload']) ? $data['payload'] : null;
     }
 
     public function batchInsert(string $collection, array $docs): int
     {
+        $collection = $this->sanitizeCollection($collection);
         $count = 0;
-        $writes = [];
 
         foreach ($docs as $doc) {
-            $id = $doc['id'] ?? bin2hex(random_bytes(8));
-            $doc['id'] ??= $id;
-            $doc['_ts'] = time();
-
-            $segment = crc32($id) % 1000;
-            $file = "{$this->basePath}/data/{$collection}_{$segment}.bin";
-
-            $json = json_encode(['id' => $id, 'payload' => $doc]);
-            $record = pack('V', strlen($json)) . $json . "\n";
-            $writes[$file][] = $record;
+            if (!is_array($doc)) {
+                continue;
+            }
+            $this->writeBinary($collection, $this->normalizeDoc($doc), (string)($doc['id'] ?? bin2hex(random_bytes(8))));
             $count++;
-        }
-
-        // Batch write
-        foreach ($writes as $file => $records) {
-            file_put_contents($file, implode('', $records), FILE_APPEND | LOCK_EX);
         }
 
         return $count;
@@ -164,49 +214,104 @@ final class DataCoreTurbo
 
     public function query(string $collection, callable $filter): array
     {
-        $results = [];
-        foreach (glob("{$this->basePath}/data/{$collection}_*.bin") as $file) {
-            $handle = fopen($file, 'rb');
-            while (!feof($handle)) {
-                $lenData = fread($handle, 4);
-                if (strlen($lenData) < 4) {
-                    break;
-                }
-                $len = unpack('V', $lenData)[1];
-                $json = fread($handle, $len);
-                $data = json_decode($json, true);
-                fgetc($handle); // newline
+        $this->flush();
+        $collection = $this->sanitizeCollection($collection);
+        $latestById = [];
 
-                if ($data && isset($data['payload']) && $filter($data['payload'])) {
-                    $results[] = $data['payload'];
+        foreach (glob("{$this->basePath}/data/{$collection}_*.bin") ?: [] as $file) {
+            $handle = fopen($file, 'rb');
+            if ($handle === false) {
+                continue;
+            }
+
+            while (!feof($handle)) {
+                $payload = $this->readOneRecord($handle);
+                if ($payload === null) {
+                    continue;
+                }
+                $id = (string)($payload['id'] ?? '');
+                if ($id !== '') {
+                    $latestById[$id] = $payload;
                 }
             }
             fclose($handle);
         }
+
+        $results = [];
+        foreach ($latestById as $payload) {
+            if (($payload['_deleted'] ?? false) === true) {
+                continue;
+            }
+            if ($filter($payload)) {
+                $results[] = $payload;
+            }
+        }
+
         return $results;
+    }
+
+    public function delete(string $collection, string $id): void
+    {
+        $this->insert($collection, ['id' => $id, '_deleted' => true, '_ts' => time()]);
+        $this->flush();
     }
 
     public function getStats(): array
     {
-        $count = 0;
-        foreach (glob("{$this->basePath}/data/*.bin") as $file) {
+        $this->flush();
+        $records = 0;
+        $collections = [];
+
+        foreach (glob("{$this->basePath}/data/*.bin") ?: [] as $file) {
+            $name = basename($file);
+            $collection = preg_replace('/_\d+\.bin$/', '', $name) ?: 'unknown';
+            $collections[$collection] = true;
+
             $handle = fopen($file, 'rb');
+            if ($handle === false) {
+                continue;
+            }
             while (!feof($handle)) {
                 $lenData = fread($handle, 4);
-                if (strlen($lenData) < 4) {
+                if ($lenData === false || strlen($lenData) < 4) {
                     break;
                 }
-                $len = unpack('V', $lenData)[1];
-                fseek($handle, $len + 1); // skip json + newline
-                $count++;
+                $len = (int)(unpack('V', $lenData)[1] ?? 0);
+                fseek($handle, $len + 1, SEEK_CUR);
+                $records++;
             }
             fclose($handle);
         }
-        return ['documents' => $count, 'buffered' => count($this->buffer)];
+
+        return [
+            'records' => $records,
+            'documents' => $records,
+            'collections' => count($collections),
+            'buffered' => count($this->buffer),
+        ];
     }
 
     public function close(): void
     {
         $this->flush();
+    }
+
+    private function normalizeDoc(array $doc): array
+    {
+        $id = (string)($doc['id'] ?? bin2hex(random_bytes(8)));
+        $doc['id'] = $id;
+        $doc['_ts'] = $doc['_ts'] ?? time();
+        return $doc;
+    }
+
+    private function segmentForId(string $id): int
+    {
+        return (int)(crc32($id) % 1000);
+    }
+
+    private function sanitizeCollection(string $collection): string
+    {
+        $clean = preg_replace('/[^a-zA-Z0-9_-]/', '_', $collection) ?: 'memories';
+        return trim($clean, '_') !== '' ? $clean : 'memories';
     }
 }

@@ -2,7 +2,7 @@
 /**
  * Cron entry point for Jah memory tier migration.
  * Run via: php /path/to/jah/php/cron_tier_migration.php
- * Or via system cron: */5 * * * * php /path/to/jah-php/cron_tier_migration.php
+ * Cron example: every 5 minutes -> php /path/to/jah-php/cron_tier_migration.php
  */
 
 declare(strict_types=1);
@@ -10,7 +10,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/core/Autoloader.php';
 
 Autoloader::register();
-Autoloader::addNamespace('Jah\Memory\\', __DIR__ . '/memory');
+Autoloader::addNamespace('Jah\\Memory\\', __DIR__ . '/memory');
 
 use Jah\Memory\TieredMemory;
 

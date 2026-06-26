@@ -195,9 +195,9 @@ class MemoryAgent extends BaseAgent
         if ($this->tieredMemory === null) {
             try {
                 $config = $this->engine->getConfig('paths', []);
-                $memoryBasePath = $config['tiered_memory'] ?? dirname(__DIR__) . '/memory/tiers';
-                $tierConfig = $this->engine->getConfig('tiered_memory_config', []);
-                $this->tieredMemory = new TieredMemory($memoryBasePath, $tierConfig);
+                $storagePath = $config['datacore_storage'] ?? dirname(__DIR__, 2) . '/runtime/memory/datacore';
+                $hotStoragePath = $config['hot_storage'] ?? dirname(__DIR__, 2) . '/runtime/memory/pyramid';
+                $this->tieredMemory = new TieredMemory($storagePath, $hotStoragePath);
             } catch (\Throwable $e) {
                 $this->log("No se pudo cargar tiered memory: " . $e->getMessage(), 'warning');
             }

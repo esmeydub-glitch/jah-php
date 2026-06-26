@@ -4,368 +4,281 @@ declare(strict_types=1);
 
 namespace Jah\Memory;
 
-use RuntimeException;
+use Jah\DataCore\DataCoreTurbo;
+use Jah\DataCore\MemoryPyramid;
+use Jah\DataCore\Compressor;
 
+/**
+ * TieredMemory
+ * Pure PHP wrapper over DataCoreTurbo + MemoryPyramid.
+ * Keeps compatibility with both call styles used in the original project:
+ * - store($id, $content, $tier)
+ * - store($tier, $key, $data)
+ */
 class TieredMemory
 {
-    private string $basePath;
-    private array $tierConfig;
-    private array $index = [];
+    private DataCoreTurbo $hot;
+    private MemoryPyramid $pyramid;
+    private string $storagePath;
+    private string $pyramidPath;
+    private string $runtimeMemoryPath;
 
-    private const TIERS = ['hot', 'warm', 'cold'];
-    private const INDEX_FILE = 'memory_index.json';
+    private const HOT_TTL = 3600;
+    private const WARM_TTL = 86400;
+    private const COLD_TTL = 604800;
 
-    public function __construct(string $basePath, array $tierConfig = [])
+    public function __construct(string $storagePath, string|array $hotStoragePath = '')
     {
-        $this->basePath = rtrim($basePath, '/');
-        $this->tierConfig = array_merge([
-            'hot' => ['ttl' => 3600, 'max_files' => 1000],
-            'warm' => ['ttl' => 86400, 'max_files' => 5000],
-            'cold' => ['ttl' => 604800, 'max_files' => 50000],
-        ], $tierConfig);
-
-        $this->ensureDirectories();
-        $this->loadIndex();
-    }
-
-    private function ensureDirectories(): void
-    {
-        foreach (self::TIERS as $tier) {
-            $path = $this->basePath . '/' . $tier;
-            if (!is_dir($path)) {
-                mkdir($path, 0775, true);
-            }
-        }
-    }
-
-    private function loadIndex(): void
-    {
-        $indexFile = $this->basePath . '/' . self::INDEX_FILE;
-        if (file_exists($indexFile)) {
-            $content = file_get_contents($indexFile);
-            $this->index = json_decode($content, true) ?? [];
-        }
-    }
-
-    private function saveIndex(): void
-    {
-        $indexFile = $this->basePath . '/' . self::INDEX_FILE;
-        file_put_contents($indexFile, json_encode($this->index, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
-    }
-
-    public function store(string $tier, string $key, array $data): bool
-    {
-        if (!in_array($tier, self::TIERS, true)) {
-            throw new RuntimeException("Invalid tier: {$tier}");
-        }
-
-        $tierPath = $this->basePath . '/' . $tier;
-        $filePath = $tierPath . '/' . $this->sanitizeKey($key) . '.json';
-
-        $record = [
-            'key' => $key,
-            'tier' => $tier,
-            'data' => $data,
-            'metadata' => [
-                'created_at' => time(),
-                'updated_at' => time(),
-                'access_count' => 0,
-                'size_bytes' => 0,
-            ],
-            'tags' => $data['tags'] ?? [],
-        ];
-
-        $json = json_encode($record, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
-        $record['metadata']['size_bytes'] = strlen($json);
-
-        file_put_contents($filePath, $json);
-
-        $this->index[$key] = [
-            'tier' => $tier,
-            'file' => $filePath,
-            'tags' => $record['tags'],
-            'created_at' => $record['metadata']['created_at'],
-            'updated_at' => $record['metadata']['updated_at'],
-        ];
-
-        $this->saveIndex();
-        return true;
-    }
-
-    public function retrieve(string $tier, string $key): ?array
-    {
-        if (!in_array($tier, self::TIERS, true)) {
-            return null;
-        }
-
-        $filePath = $this->basePath . '/' . $tier . '/' . $this->sanitizeKey($key) . '.json';
-
-        if (!file_exists($filePath)) {
-            return null;
-        }
-
-        $content = file_get_contents($filePath);
-        $record = json_decode($content, true);
-
-        if ($record) {
-            $record['metadata']['access_count']++;
-            $record['metadata']['last_accessed'] = time();
-            file_put_contents($filePath, json_encode($record, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
-        }
-
-        return $record;
-    }
-
-    public function search(string $query, array $tiers = ['hot', 'warm', 'cold'], int $limit = 20): array
-    {
-        $results = [];
-        $queryLower = strtolower($query);
-        $queryTerms = array_filter(explode(' ', $queryLower));
-
-        foreach ($tiers as $tier) {
-            if (!in_array($tier, self::TIERS, true)) {
-                continue;
-            }
-
-            $tierPath = $this->basePath . '/' . $tier;
-            $files = glob($tierPath . '/*.json') ?: [];
-
-            foreach ($files as $file) {
-                $content = file_get_contents($file);
-                $record = json_decode($content, true);
-
-                if (!$record) {
-                    continue;
-                }
-
-                $score = $this->calculateRelevance($record, $queryTerms, $queryLower);
-
-                if ($score > 0) {
-                    $results[] = [
-                        'key' => $record['key'],
-                        'tier' => $tier,
-                        'score' => $score,
-                        'data' => $record['data'],
-                        'metadata' => $record['metadata'],
-                    ];
-                }
-            }
-        }
-
-        usort($results, fn($a, $b) => $b['score'] <=> $a['score']);
-
-        return array_slice($results, 0, $limit);
-    }
-
-    public function getByTags(array $tags, array $tiers = ['hot', 'warm', 'cold'], int $limit = 20): array
-    {
-        $results = [];
-        $tagsLower = array_map('strtolower', $tags);
-
-        foreach ($tiers as $tier) {
-            if (!in_array($tier, self::TIERS, true)) {
-                continue;
-            }
-
-            $tierPath = $this->basePath . '/' . $tier;
-            $files = glob($tierPath . '/*.json') ?: [];
-
-            foreach ($files as $file) {
-                $content = file_get_contents($file);
-                $record = json_decode($content, true);
-
-                if (!$record || empty($record['tags'])) {
-                    continue;
-                }
-
-                $recordTagsLower = array_map('strtolower', $record['tags']);
-                $matches = array_intersect($tagsLower, $recordTagsLower);
-
-                if (!empty($matches)) {
-                    $results[] = [
-                        'key' => $record['key'],
-                        'tier' => $tier,
-                        'score' => count($matches),
-                        'data' => $record['data'],
-                        'metadata' => $record['metadata'],
-                    ];
-                }
-            }
-        }
-
-        usort($results, fn($a, $b) => $b['score'] <=> $a['score']);
-
-        return array_slice($results, 0, $limit);
-    }
-
-    public function moveTier(string $key, string $toTier): bool
-    {
-        if (!in_array($toTier, self::TIERS, true)) {
-            return false;
-        }
-
-        $entry = $this->index[$key] ?? null;
-        if (!$entry) {
-            return false;
-        }
-
-        $fromTier = $entry['tier'];
-        if ($fromTier === $toTier) {
-            return true;
-        }
-
-        $fromPath = $this->basePath . '/' . $fromTier . '/' . $this->sanitizeKey($key) . '.json';
-        $toPath = $this->basePath . '/' . $toTier . '/' . $this->sanitizeKey($key) . '.json';
-
-        if (!file_exists($fromPath)) {
-            return false;
-        }
-
-        rename($fromPath, $toPath);
-
-        $this->index[$key]['tier'] = $toTier;
-        $this->index[$key]['updated_at'] = time();
-        $this->saveIndex();
-
-        return true;
-    }
-
-    public function listAll(string $tier = '', int $limit = 100, int $offset = 0): array
-    {
-        $results = [];
-
-        if ($tier !== '' && in_array($tier, self::TIERS, true)) {
-            $tiers = [$tier];
+        if (is_array($hotStoragePath)) {
+            // Legacy constructor compatibility: base path + tier config.
+            $base = rtrim($storagePath, '/');
+            $this->storagePath = $base . '/datacore';
+            $this->pyramidPath = $base . '/pyramid';
         } else {
-            $tiers = self::TIERS;
+            $this->storagePath = rtrim($storagePath, '/');
+            $this->pyramidPath = rtrim($hotStoragePath !== '' ? $hotStoragePath : dirname($this->storagePath) . '/pyramid', '/');
         }
 
-        foreach ($tiers as $t) {
-            $tierPath = $this->basePath . '/' . $t;
-            $files = glob($tierPath . '/*.json') ?: [];
+        $this->runtimeMemoryPath = dirname($this->storagePath);
+        $this->hot = new DataCoreTurbo($this->storagePath, 500);
+        $this->pyramid = new MemoryPyramid($this->pyramidPath);
 
-            foreach ($files as $file) {
-                $content = file_get_contents($file);
-                $record = json_decode($content, true);
-
-                if ($record) {
-                    $results[] = [
-                        'key' => $record['key'],
-                        'tier' => $t,
-                        'tags' => $record['tags'] ?? [],
-                        'created_at' => $record['metadata']['created_at'] ?? 0,
-                        'size_bytes' => $record['metadata']['size_bytes'] ?? 0,
-                    ];
-                }
+        foreach (['warm', 'cold'] as $dir) {
+            $path = $this->runtimeMemoryPath . '/' . $dir;
+            if (!is_dir($path)) {
+                mkdir($path, 0700, true);
             }
         }
-
-        $total = count($results);
-        $results = array_slice($results, $offset, $limit);
-
-        return [
-            'total' => $total,
-            'limit' => $limit,
-            'offset' => $offset,
-            'items' => $results,
-        ];
     }
 
-    public function delete(string $key): bool
+    public function search(string $query, string|array $collectionOrTiers = 'memories', int $limit = 20): array
     {
-        $entry = $this->index[$key] ?? null;
-        if (!$entry) {
+        $collection = is_array($collectionOrTiers) ? 'memories' : $collectionOrTiers;
+        $queryLower = strtolower($query);
+        $terms = array_values(array_filter(explode(' ', $queryLower)));
+        $allResults = [];
+
+        $hotResults = $this->hot->query($collection, static function (array $doc) use ($queryLower, $terms): bool {
+            if (($doc['_deleted'] ?? false) === true) return false;
+            if (($doc['role'] ?? '') === 'assistant') return false;
+            $searchable = strtolower(json_encode($doc, JSON_UNESCAPED_UNICODE) ?: '');
+            if ($queryLower !== '' && str_contains($searchable, $queryLower)) return true;
+            foreach ($terms as $term) {
+                if ($term !== '' && str_contains($searchable, $term)) return true;
+            }
             return false;
+        });
+
+        foreach ($hotResults as $doc) {
+            $doc['_memory_tier'] = $doc['_tier'] ?? 'hot';
+            $allResults[] = $doc;
         }
 
-        $filePath = $this->basePath . '/' . $entry['tier'] . '/' . $this->sanitizeKey($key) . '.json';
-
-        if (file_exists($filePath)) {
-            unlink($filePath);
+        foreach ($this->readWarmRecords($queryLower, $terms) as $doc) {
+            $doc['_memory_tier'] = 'warm';
+            $allResults[] = $doc;
         }
 
-        unset($this->index[$key]);
-        $this->saveIndex();
+        foreach ($this->readColdRecords($queryLower, $terms) as $doc) {
+            $doc['_memory_tier'] = 'cold';
+            $allResults[] = $doc;
+        }
+
+        usort($allResults, static fn(array $a, array $b): int => (int)($b['_ts'] ?? 0) <=> (int)($a['_ts'] ?? 0));
+
+        return array_slice($allResults, 0, $limit);
+    }
+
+    public function store(string $first, mixed $second, mixed $third = 'hot'): bool
+    {
+        if (is_string($second) && is_array($third)) {
+            // Legacy style: store($tier, $key, $data)
+            $tier = $this->normalizeTier($first);
+            $id = $second;
+            $content = $third;
+        } else {
+            // Current style: store($id, $content, $tier)
+            $id = $first;
+            $content = is_array($second) ? $second : ['content' => (string)$second];
+            $tier = $this->normalizeTier(is_string($third) ? $third : 'hot');
+        }
+
+        $content['id'] = $id;
+        $content['_ts'] = $content['_ts'] ?? time();
+        $content['_tier'] = $tier;
+
+        $this->hot->insert('memories', $content);
+        $this->hot->flush();
+        $this->pyramid->set($id, $content, $tier === 'cold' ? self::COLD_TTL : 0);
+
+        if ($tier === 'warm') {
+            $this->appendWarm($id, $content);
+        } elseif ($tier === 'cold') {
+            $this->appendCold($id, $content);
+        }
 
         return true;
     }
 
-    public function getStats(): array
+    public function retrieve(string $tierOrId, ?string $key = null): ?array
     {
-        $stats = [];
-
-        foreach (self::TIERS as $tier) {
-            $tierPath = $this->basePath . '/' . $tier;
-            $files = glob($tierPath . '/*.json') ?: [];
-            $totalSize = 0;
-
-            foreach ($files as $file) {
-                $totalSize += filesize($file);
-            }
-
-            $stats[$tier] = [
-                'count' => count($files),
-                'total_size_bytes' => $totalSize,
-                'max_files' => $this->tierConfig[$tier]['max_files'],
-                'ttl_seconds' => $this->tierConfig[$tier]['ttl'],
-            ];
+        $id = $key ?? $tierOrId;
+        $fromTurbo = $this->hot->find('memories', $id);
+        if ($fromTurbo !== null) {
+            return $fromTurbo;
         }
 
-        return $stats;
+        $fromPyramid = $this->pyramid->get($id);
+        if (is_array($fromPyramid) && ($fromPyramid['_deleted'] ?? false) === true) {
+            return null;
+        }
+        return is_array($fromPyramid) ? $fromPyramid : null;
+    }
+
+    public function forget(string $id, string $collection = 'memories'): void
+    {
+        $this->hot->delete($collection, $id);
+        $this->pyramid->set($id, ['id' => $id, '_deleted' => true, '_ts' => time()]);
+    }
+
+    public function migrate(string $collection = 'memories'): array
+    {
+        $migrated = ['hot_to_warm' => 0, 'warm_to_cold' => 0];
+        $now = time();
+
+        $allDocs = $this->hot->query($collection, static fn(array $doc): bool => ($doc['_deleted'] ?? false) !== true);
+
+        foreach ($allDocs as $doc) {
+            $id = (string)($doc['id'] ?? '');
+            if ($id === '') continue;
+
+            $ts = (int)($doc['_ts'] ?? $now);
+            $currentTier = $this->normalizeTier((string)($doc['_tier'] ?? 'hot'));
+            $age = $now - $ts;
+
+            if ($currentTier === 'hot' && $age > self::HOT_TTL) {
+                $doc['_tier'] = 'warm';
+                $this->appendWarm($id, $doc);
+                $this->hot->insert($collection, $doc);
+                $migrated['hot_to_warm']++;
+            } elseif ($currentTier === 'warm' && $age > self::WARM_TTL) {
+                $doc['_tier'] = 'cold';
+                $this->appendCold($id, $doc);
+                $this->hot->insert($collection, $doc);
+                $migrated['warm_to_cold']++;
+            }
+        }
+
+        $this->hot->flush();
+        return $migrated;
     }
 
     public function migrateTiers(): array
     {
-        $migrated = [];
-        $now = time();
-
-        foreach ($this->index as $key => $entry) {
-            $tier = $entry['tier'];
-            $createdAt = $entry['created_at'] ?? $now;
-            $age = $now - $createdAt;
-            $ttl = $this->tierConfig[$tier]['ttl'];
-
-            if ($age > $ttl) {
-                $nextTier = $this->getNextTier($tier);
-                if ($nextTier && $this->moveTier($key, $nextTier)) {
-                    $migrated[] = ['key' => $key, 'from' => $tier, 'to' => $nextTier];
-                }
+        $summary = $this->migrate('memories');
+        $events = [];
+        foreach ($summary as $path => $count) {
+            for ($i = 0; $i < $count; $i++) {
+                [$from, $to] = explode('_to_', $path);
+                $events[] = ['key' => 'memory', 'from' => $from, 'to' => $to];
             }
         }
-
-        return $migrated;
+        return $events;
     }
 
-    private function getNextTier(string $tier): ?string
+    public function stats(): array
     {
-        return match ($tier) {
-            'hot' => 'warm',
-            'warm' => 'cold',
-            'cold' => null,
-            default => null,
-        };
+        return array_merge($this->pyramid->stats(), [
+            'hot_documents' => $this->hot->getStats()['documents'] ?? 0,
+            'warm_records' => $this->countNdjson($this->runtimeMemoryPath . '/warm'),
+            'cold_files' => count(glob($this->runtimeMemoryPath . '/cold/*.json.gz') ?: []),
+        ]);
     }
 
-    private function calculateRelevance(array $record, array $terms, string $query): float
+    public function close(): void
     {
-        $score = 0.0;
-        $searchable = strtolower(json_encode($record['data']) . ' ' . implode(' ', $record['tags'] ?? []));
+        $this->hot->close();
+    }
 
+    private function appendWarm(string $id, array $doc): void
+    {
+        $dir = $this->runtimeMemoryPath . '/warm';
+        if (!is_dir($dir)) mkdir($dir, 0700, true);
+        $file = $dir . '/warm_' . date('Ymd') . '.ndjson';
+        $record = json_encode(['key' => $id, 'payload' => $doc], JSON_UNESCAPED_UNICODE);
+        if ($record !== false) {
+            file_put_contents($file, $record . "\n", FILE_APPEND | LOCK_EX);
+        }
+    }
+
+    private function appendCold(string $id, array $doc): void
+    {
+        $dir = $this->runtimeMemoryPath . '/cold';
+        if (!is_dir($dir)) mkdir($dir, 0700, true);
+        $file = $dir . '/cold_' . $id . '_' . time() . '.json.gz';
+        $json = json_encode([$id => $doc], JSON_UNESCAPED_UNICODE);
+        if ($json !== false) {
+            file_put_contents($file, Compressor::compress($json, 'gzip'), LOCK_EX);
+        }
+    }
+
+    private function readWarmRecords(string $queryLower, array $terms): array
+    {
+        $records = [];
+        $dir = $this->runtimeMemoryPath . '/warm';
+        foreach (glob($dir . '/*.ndjson') ?: [] as $file) {
+            foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                $record = json_decode($line, true);
+                $doc = is_array($record) ? ($record['payload'] ?? null) : null;
+                if (!is_array($doc) || ($doc['_deleted'] ?? false) === true || ($doc['role'] ?? '') === 'assistant') continue;
+                if ($this->matches($doc, $queryLower, $terms)) $records[] = $doc;
+            }
+        }
+        return $records;
+    }
+
+    private function readColdRecords(string $queryLower, array $terms): array
+    {
+        $records = [];
+        $dir = $this->runtimeMemoryPath . '/cold';
+        foreach (glob($dir . '/*.json.gz') ?: [] as $file) {
+            $tmp = tempnam(sys_get_temp_dir(), 'jah_cold_');
+            if ($tmp === false) continue;
+            $ok = Compressor::decompressFile($file, $tmp, 'gzip');
+            $raw = $ok ? file_get_contents($tmp) : false;
+            @unlink($tmp);
+            $data = $raw !== false ? json_decode($raw, true) : null;
+            if (!is_array($data)) continue;
+            foreach ($data as $doc) {
+                if (!is_array($doc) || ($doc['_deleted'] ?? false) === true || ($doc['role'] ?? '') === 'assistant') continue;
+                if ($this->matches($doc, $queryLower, $terms)) $records[] = $doc;
+            }
+        }
+        return $records;
+    }
+
+    private function matches(array $doc, string $queryLower, array $terms): bool
+    {
+        $searchable = strtolower(json_encode($doc, JSON_UNESCAPED_UNICODE) ?: '');
+        if ($queryLower !== '' && str_contains($searchable, $queryLower)) return true;
         foreach ($terms as $term) {
-            if (str_contains($searchable, $term)) {
-                $score += 1.0;
-            }
+            if ($term !== '' && str_contains($searchable, $term)) return true;
         }
-
-        if (str_contains($searchable, $query)) {
-            $score += 2.0;
-        }
-
-        return $score;
+        return false;
     }
 
-    private function sanitizeKey(string $key): string
+    private function countNdjson(string $dir): int
     {
-        return preg_replace('/[^a-zA-Z0-9_-]/', '_', $key);
+        $count = 0;
+        foreach (glob($dir . '/*.ndjson') ?: [] as $file) {
+            $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            $count += is_array($lines) ? count($lines) : 0;
+        }
+        return $count;
+    }
+
+    private function normalizeTier(string $tier): string
+    {
+        return in_array($tier, ['hot', 'warm', 'cold'], true) ? $tier : 'hot';
     }
 }
