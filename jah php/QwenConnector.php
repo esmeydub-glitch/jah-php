@@ -14,9 +14,12 @@ class QwenConnector
 
     public function chat(string $prompt, string $context = '', string $model = 'qwen-max'): string
     {
-        $systemPrompt = !empty($context)
-            ? "Eres un asistente útil y preciso. Usa este contexto:\n" . $context
-            : 'Eres un asistente útil y preciso.';
+        $systemPrompt = "Eres un asistente útil y preciso. ";
+        if (!empty($context)) {
+            $systemPrompt .= "Usa el siguiente contexto para personalizar tus respuestas. Si el contexto no contiene la información necesaria, usa tu propio conocimiento para responder:\n" . $context;
+        } else {
+            $systemPrompt .= "Usa tu conocimiento para responder la pregunta del usuario.";
+        }
 
         $data = [
             'model' => $model,

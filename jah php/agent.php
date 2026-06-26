@@ -2,14 +2,6 @@
 
 declare(strict_types=1);
 
-/**
- * agent.php — El Cerebro del Agente.
- *
- * Recibe pregunta del usuario → busca contexto en DataCore (hot/warm)
- * → construye prompt con memoria → llama a Qwen → guarda interacción
- * en memoria caliente.
- */
-
 $basePath = __DIR__;
 
 require_once $basePath . '/core/Autoloader.php';
@@ -21,7 +13,6 @@ Autoloader::addNamespace('Jah\\Agents\\',   $basePath . '/agents');
 Autoloader::addNamespace('Jah\\Memory\\',   $basePath . '/memory');
 Autoloader::addNamespace('Jah\\DataCore\\', dirname($basePath) . '/jah-datacore/src');
 
-use Jah\Core\JahEngine;
 use Jah\DataCore\DataCoreTurbo;
 use Jah\DataCore\MemoryPyramid;
 
@@ -39,7 +30,7 @@ $input = json_decode(file_get_contents('php://input'), true, 512, JSON_THROW_ON_
 
 if (!is_array($input) || !isset($input['message']) || !is_string($input['message'])) {
     http_response_code(400);
-    echo json_encode(['error' => 'No message provided'], JSON_THROW_ON_ERROR);
+    echo json_encode(['error' => 'No message provided'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -47,14 +38,14 @@ $userMessage = trim($input['message']);
 
 if ($userMessage === '') {
     http_response_code(400);
-    echo json_encode(['error' => 'Empty message'], JSON_THROW_ON_ERROR);
+    echo json_encode(['error' => 'Empty message'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 $configFile = $basePath . '/config/config.php';
 if (!is_file($configFile)) {
     http_response_code(500);
-    echo json_encode(['error' => 'Config file not found'], JSON_THROW_ON_ERROR);
+    echo json_encode(['error' => 'Config file not found'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -95,6 +86,15 @@ foreach ($hotResults as $item) {
 
 $contextString = implode("\n", array_slice($contextItems, 0, 10));
 
+date_default_timezone_set('America/Mexico_City');
+$currentDate = date('Y-m-d H:i:s T');
+$systemContext = "Fecha y hora actual: $currentDate\nDirectorio de trabajo: {$basePath}\n";
+if (!empty($contextString)) {
+    $contextString = $systemContext . "Contexto de memoria:\n" . $contextString;
+} else {
+    $contextString = $systemContext . "No hay contexto de memoria previo.";
+}
+
 $qwenConfigFile = $basePath . '/config/qwen.php';
 $configApiKey = '';
 $configModel = 'qwen-max';
@@ -118,16 +118,12 @@ $model = $configModel;
 
 if (empty($apiKey)) {
     http_response_code(500);
-    echo json_encode([
-        'error' => 'QWEN_API_KEY not configured. Set QWEN_API_KEY environment variable or edit config/qwen.php.',
-    ], JSON_THROW_ON_ERROR);
+    echo json_encode(['error' => 'QWEN_API_KEY not configured. Set QWEN_API_KEY environment variable or edit config/qwen.php.'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
     $turbo->close();
     exit;
 }
 
-$model = $qwenConfig['model'] ?? 'qwen-max';
 $qwen = new QwenConnector($apiKey);
-
 $response = $qwen->chat($userMessage, $contextString, $model);
 
 $now = time();
@@ -163,4 +159,4 @@ echo json_encode([
     'context_used' => count($hotResults),
     'model' => $model,
     'memory_ids' => ['user' => $userMemoryId, 'assistant' => $assistantMemoryId],
-], JSON_THROW_ON_ERROR);
+], JSON_UNESCAPED_UNICODE);
