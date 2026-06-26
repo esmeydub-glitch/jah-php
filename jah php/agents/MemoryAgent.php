@@ -5,32 +5,28 @@ declare(strict_types=1);
 namespace Jah\Agents;
 
 use Jah\Memory\Database;
+use Jah\Memory\TieredMemory;
 
-/**
- * MemoryAgent — FASE 2: Memoria MySQL JAH.
- * Guarda y recupera eventos, decisiones, errores y estados de agentes para proveer contexto al sistema.
- */
 class MemoryAgent extends BaseAgent
 {
     private ?Database $db = null;
+    private ?TieredMemory $tieredMemory = null;
 
     protected function onBoot(): void
     {
-        // El MemoryAgent escucha eventos de logs, errores y decisiones para guardarlos persistente
         $this->subscribeToEvent('system.boot');
         $this->subscribeToEvent('gateway.validated');
         $this->subscribeToEvent('executor.started');
         $this->subscribeToEvent('executor.finished');
         $this->subscribeToEvent('analyst.report');
         $this->subscribeToEvent('system.error');
+        $this->subscribeToEvent('memory.stored');
     }
 
-    /**
-     * Procesa y persiste eventos importantes en la base de datos MySQL.
-     */
     public function handle(array $event): void
     {
         $this->lazyLoadDb();
+        $this->lazyLoadTieredMemory();
 
         if ($event['type'] === 'system.boot') {
             if ($this->db) {
@@ -39,39 +35,63 @@ class MemoryAgent extends BaseAgent
             } else {
                 $this->log('Memory Agent sin base de datos. Persistencia desactivada.', 'warning');
             }
+
+            if ($this->tieredMemory) {
+                $this->log('Memory Agent: Tiered memory system active.', 'info');
+            }
             return;
         }
 
-        if (!$this->db) {
-            $this->log('Base de datos no disponible. Ignorando guardado de evento: ' . $event['type'], 'warning');
+        if ($event['type'] === 'memory.stored') {
             return;
         }
 
-        $this->saveEvent($event);
+        if (!$this->db && !$this->tieredMemory) {
+            $this->log('No storage backend available. Ignoring event: ' . $event['type'], 'warning');
+            return;
+        }
 
-        if ($event['type'] === 'system.error') {
+        if ($this->db) {
+            $this->saveEvent($event);
+        }
+
+        if ($this->tieredMemory && in_array($event['type'], ['executor.finished', 'analyst.report'])) {
+            $this->tieredMemory->store('warm', $event['id'], [
+                'type' => $event['type'],
+                'payload' => $event['payload'],
+                'source' => $event['source'],
+                'timestamp' => $event['timestamp'],
+                'tags' => ['event', $event['type']],
+            ]);
+        }
+
+        if ($event['type'] === 'system.error' && $this->db) {
             $this->saveError(
                 $event['payload']['message'] ?? 'Unknown error',
                 $event['payload']['trace'] ?? '',
                 $event['source']
             );
+
+            if ($this->tieredMemory) {
+                $this->tieredMemory->store('hot', 'error_' . $event['id'], [
+                    'type' => 'error',
+                    'message' => $event['payload']['message'] ?? 'Unknown error',
+                    'tags' => ['error', 'critical'],
+                ]);
+            }
         }
     }
 
-    /**
-     * Guarda un evento genérico en el log de eventos de MySQL.
-     */
     public function saveEvent(array $event): void
     {
         if (!$this->db) {
-            $this->log("Base de datos no disponible. Ignorando guardado de evento: " . $event['type'], 'warning');
             return;
         }
 
         try {
-            $sql = "INSERT INTO jah_events (event_id, event_type, payload, source, created_at) 
+            $sql = "INSERT INTO jah_events (event_id, event_type, payload, source, created_at)
                     VALUES (:id, :type, :payload, :source, NOW())";
-            
+
             $payload = json_encode($event['payload'] ?? [], JSON_THROW_ON_ERROR);
 
             $this->db->query($sql, [
@@ -85,17 +105,14 @@ class MemoryAgent extends BaseAgent
         }
     }
 
-    /**
-     * Guarda un error detectado en el sistema.
-     */
     public function saveError(string $message, string $trace, string $source): void
     {
         if (!$this->db) return;
 
         try {
-            $sql = "INSERT INTO jah_errors (message, trace, source, created_at) 
+            $sql = "INSERT INTO jah_errors (message, trace, source, created_at)
                     VALUES (:message, :trace, :source, NOW())";
-            
+
             $this->db->query($sql, [
                 'message' => $message,
                 'trace'   => $this->redactSecrets($trace),
@@ -106,9 +123,6 @@ class MemoryAgent extends BaseAgent
         }
     }
 
-    /**
-     * Recupera el historial de decisiones anteriores para evitar repetir errores.
-     */
     public function getPreviousDecisions(string $context, int $limit = 5): array
     {
         $this->lazyLoadDb();
@@ -126,10 +140,45 @@ class MemoryAgent extends BaseAgent
         }
     }
 
-    /**
-     * Carga de forma perezosa la instancia de base de datos para no fallar
-     * si se inicializa el motor sin base de datos configurada.
-     */
+    public function searchMemory(string $query, array $tiers = ['hot', 'warm'], int $limit = 10): array
+    {
+        if (!$this->tieredMemory) {
+            $this->lazyLoadTieredMemory();
+        }
+
+        if (!$this->tieredMemory) {
+            return [];
+        }
+
+        return $this->tieredMemory->search($query, $tiers, $limit);
+    }
+
+    public function storeInMemory(string $tier, string $key, array $data): bool
+    {
+        if (!$this->tieredMemory) {
+            $this->lazyLoadTieredMemory();
+        }
+
+        if (!$this->tieredMemory) {
+            return false;
+        }
+
+        return $this->tieredMemory->store($tier, $key, $data);
+    }
+
+    public function getFromMemory(string $tier, string $key): ?array
+    {
+        if (!$this->tieredMemory) {
+            $this->lazyLoadTieredMemory();
+        }
+
+        if (!$this->tieredMemory) {
+            return null;
+        }
+
+        return $this->tieredMemory->retrieve($tier, $key);
+    }
+
     private function lazyLoadDb(): void
     {
         if ($this->db === null) {
@@ -137,6 +186,20 @@ class MemoryAgent extends BaseAgent
                 $this->db = Database::getInstance();
             } catch (\Throwable $e) {
                 $this->log("No se pudo conectar a la base de datos: " . $e->getMessage(), 'warning');
+            }
+        }
+    }
+
+    private function lazyLoadTieredMemory(): void
+    {
+        if ($this->tieredMemory === null) {
+            try {
+                $config = $this->engine->getConfig('paths', []);
+                $memoryBasePath = $config['tiered_memory'] ?? dirname(__DIR__) . '/memory/tiers';
+                $tierConfig = $this->engine->getConfig('tiered_memory_config', []);
+                $this->tieredMemory = new TieredMemory($memoryBasePath, $tierConfig);
+            } catch (\Throwable $e) {
+                $this->log("No se pudo cargar tiered memory: " . $e->getMessage(), 'warning');
             }
         }
     }

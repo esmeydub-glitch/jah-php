@@ -33,6 +33,12 @@ return [
         'logs' => (string) jah_env('JAH_LOG_DIR', dirname(__DIR__) . '/logs'),
         'tmp' => (string) jah_env('JAH_TMP_DIR', dirname(__DIR__) . '/tmp'),
         'cache' => (string) jah_env('JAH_CACHE_DIR', dirname(__DIR__) . '/cache/store'),
+        'tiered_memory' => (string) jah_env('JAH_TIERED_MEMORY_DIR', dirname(__DIR__) . '/memory/tiers'),
+    ],
+    'tiered_memory_config' => [
+        'hot' => ['ttl' => 3600, 'max_files' => 1000],
+        'warm' => ['ttl' => 86400, 'max_files' => 5000],
+        'cold' => ['ttl' => 604800, 'max_files' => 50000],
     ],
     'log' => [
         'enabled' => (bool) jah_env('JAH_LOG_ENABLED', true),
