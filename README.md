@@ -1,6 +1,6 @@
-# JAH-PHP — Motor de Agentes PHP con Memoria Escalonada
+# JAH-PHP — Motor de Agentes PHP con DataCore Binario
 
-**JAH-PHP** es un framework de agentes de IA basado en PHP con un sistema de memoria tiered (caliente/tibia/fría) y una API REST para integración con LLMs como Qwen.
+**JAH-PHP** es un framework de agentes de IA en PHP nativo con un motor de almacenamiento binario de alto rendimiento (**DataCore**) y una API REST para integración con LLMs como Qwen.
 
 ---
 
@@ -11,7 +11,7 @@
 │  Qwen / LLM Cloud                                           │
 │  (JahQwenAgent — Python)                                    │
 └──────────────────────┬──────────────────────────────────────┘
-                       │ HTTP REST
+                       │ HTTP REST (JSON)
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  JahMemoryBridge (Python)                                   │
@@ -22,15 +22,22 @@
                        │ HTTP REST
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  bridge.php (API Endpoint)                                  │
+│  api.php (API Endpoint)                                     │
 └──────────────────────┬──────────────────────────────────────┘
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  TieredMemory (PHP Filesystem)                              │
+│  DataCoreTurbo (PHP — Formato Binario)                      │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  [4 bytes length][JSON payload][newline] per record  │   │
+│  │  Segmentado por hash (1000 segmentos)                │   │
+│  │  Índices .idx para búsqueda O(1)                      │   │
+│  └──────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────┤
+│  MemoryPyramid (PHP — 3 Niveles)                            │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐                  │
 │  │  hot/    │→ │  warm/   │→ │  cold/   │                  │
-│  │  (1h)    │  │  (24h)   │  │  (7d)    │                  │
+│  │  (LRU)   │  │  (ndjson)│  │  (gzip)  │                  │
 │  └──────────┘  └──────────┘  └──────────┘                  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -43,7 +50,8 @@
 .
 ├── jah-php/                       # Núcleo PHP
 │   ├── index.php                  # Punto de entrada (CLI/HTTP)
-│   ├── bridge.php                 # API REST para agentes externos
+│   ├── api.php                    # API REST para agentes externos
+│   ├── bridge.php                 # Alias hacia api.php
 │   ├── migrate_tiers.php          # CLI: migración de tiers
 │   ├── cron_tier_migration.php    # Cron: migración automática
 │   ├── config/
@@ -73,7 +81,15 @@
 │   │   ├── Database.php           # PDO wrapper (MySQL)
 │   │   ├── TieredMemory.php       # Sistema de memoria escalonada
 │   │   ├── schema.sql             # Esquema MySQL
-│   │   └── tiers/                 # Almacenamiento físico
+│   │   ├── datacore/             # Almacenamiento binario DataCore
+│   │   │   ├── data/
+│   │   │   ├── index/
+│   │   │   └── wal/
+│   │   ├── pyramid/               # MemoryPyramid (hot/warm/cold)
+│   │   │   ├── hot/
+│   │   │   ├── warm/
+│   │   │   └── cold/
+│   │   └── tiers/                 # TieredMemory filesystem
 │   │       ├── hot/
 │   │       ├── warm/
 │   │       └── cold/
@@ -81,6 +97,21 @@
 │   ├── cache/                     # Caché en archivos
 │   ├── logs/                      # Logs del sistema
 │   └── tmp/                       # Archivos temporales
+├── jah-datacore/                  # Motor NoSQL PHP (DataCore)
+│   ├── src/
+│   │   ├── DataCoreTurbo.php      # Almacenamiento binario + batch
+│   │   ├── DataCoreLightning.php  # Escritura ultra-rápida
+│   │   ├── MemoryPyramid.php      # Cache LRU + warm + cold
+│   │   ├── StorageAgent.php       # Append-only con índices
+│   │   ├── CacheAgent.php         # LRU en RAM (10k entries)
+│   │   ├── BufferQueue.php        # Escritura en bloque
+│   │   ├── WALTransactionCore.php # Write-Ahead Log ACID
+│   │   ├── Compressor.php         # LZ4/ZSTD/GZIP
+│   │   ├── IndexAgent.php         # Índices por campo
+│   │   ├── Agents.php             # Lock, Event, Transaction, Schema, Integrity
+│   │   └── ...
+│   ├── tests/
+│   └── benchmarks/
 ├── jah-qwen-bridge/               # Bridge Python
 │   ├── jah_bridge/
 │   │   └── __init__.py            # JahMemoryBridge + JahQwenAgent
@@ -93,47 +124,96 @@
 
 ---
 
+## DataCore — Motor de Almacenamiento Binario
+
+DataCore es un motor NoSQL 100% PHP sin SQL ni dependencias externas.
+
+### Formato Binario
+
+```
+Archivo: {collection}_{segment}.bin
+
+Formato de registro:
+┌─────────────────┬──────────────────────┬──────────┐
+│ 4 bytes (uint32)│ JSON payload         │ \n       │
+│ longitud        │                      │ newline  │
+└─────────────────┴──────────────────────┴──────────┘
+```
+
+### Rendimiento
+
+| Operación | DataCore Lightning | SQLite3 | Factor |
+|-----------|-------------------|---------|--------|
+| 1k inserts | 0.72 ms (1.4M/s) | 19,922 ms (50/s) | **27,700x** |
+| 5k inserts | 4.45 ms (1.1M/s) | 95,356 ms (52/s) | **21,400x** |
+| 1k ACID tx | 47 ms | 13,261 ms | **281x** |
+
+### Clases principales
+
+| Clase | Función |
+|-------|---------|
+| `DataCoreTurbo` | Almacenamiento binario segmentado + batch + mmap |
+| `DataCoreLightning` | Escritura máxima velocidad con buffer |
+| `MemoryPyramid` | Cache LRU (hot) + ndjson (warm) + gzip (cold) |
+| `StorageAgent` | Append-only con índices .idx |
+| `WALTransactionCore` | Write-Ahead Log ACID con hash chain |
+| `BufferQueue` | Escritura en bloque con flush inteligente |
+| `Compressor` | Compresión LZ4/ZSTD/GZIP |
+
+---
+
 ## Inicio Rápido
 
 ### Requisitos
 
-- PHP 8.0+
-- Extensiones: `curl`, `pdo_mysql`, `json`
+- PHP 8.0+ con extensiones: `curl`, `pdo_mysql`, `json`
 - MySQL/MariaDB (opcional, para persistencia histórica)
 - Python 3.10+ (para el bridge)
 
-### 1. Configurar entorno
-
-```bash
-cd jah-php
-
-# Configurar credenciales (opcional)
-export JAH_DB_HOST=localhost
-export JAH_DB_NAME=jah_motor
-export JAH_DB_USER=root
-export JAH_DB_PASS=tu_password
-```
-
-### 2. Inicializar base de datos (opcional)
-
-```bash
-mysql -u root -p < jah-php/memory/schema.sql
-```
-
-### 3. Levantar servidor PHP
+### 1. Levantar servidor PHP
 
 ```bash
 cd jah-php
 php -S localhost:8000
 ```
 
-### 4. Verificar estado
+### 2. Verificar estado
 
 ```bash
-curl http://localhost:8000/
+curl http://localhost:8000/api.php
 ```
 
-### 5. Probar el bridge (Python)
+### 3. Probar el API
+
+```bash
+# Guardar memoria
+curl -X POST http://localhost:8000/api.php \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "save",
+    "collection": "memories",
+    "tier": "hot",
+    "data": {
+      "id": "test_001",
+      "content": "Primera memoria de prueba",
+      "tags": ["test", "demo"]
+    }
+  }'
+
+# Buscar
+curl -X POST http://localhost:8000/api.php \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "search",
+    "collection": "memories",
+    "query": "prueba"
+  }'
+
+# Estadísticas
+curl http://localhost:8000/api.php?action=stats
+```
+
+### 4. Python Bridge
 
 ```bash
 cd jah-qwen-bridge
@@ -141,128 +221,86 @@ pip install -e .
 python demo.py
 ```
 
----
-
-## Sistema de Memoria Escalonada
-
-El sistema de memoria de JAH organiza los datos en tres tiers según su "temperatura" (frecuencia de acceso y antigüedad):
-
-| Tier | TTL | Capacidad | Uso |
-|------|-----|-----------|-----|
-| **hot** | 1 hora | 1,000 archivos | Acceso inmediato, datos de sesión |
-| **warm** | 24 horas | 5,000 archivos | Datos recientes, contexto de trabajo |
-| **cold** | 7 días | 50,000 archivos | Histórico, archivo a largo plazo |
-
-### Migración automática
-
-Los datos migran automáticamente entre tiers según su TTL:
-
-```
-Nuevo dato → hot/ (0-1h) → warm/ (1-24h) → cold/ (24h-7d) → eliminado
-```
-
-Configurar TTL en `config/config.php`:
-
-```php
-'tiered_memory_config' => [
-    'hot' => ['ttl' => 3600, 'max_files' => 1000],
-    'warm' => ['ttl' => 86400, 'max_files' => 5000],
-    'cold' => ['ttl' => 604800, 'max_files' => 50000],
-],
-```
-
-### Ejecutar migración manualmente
+### 5. Inyección masiva (para demos)
 
 ```bash
-# CLI
-php jah-php/migrate_tiers.php migrate
-
-# Cron (cada 5 minutos)
-*/5 * * * * php /path/to/jah-php/cron_tier_migration.php
+cd jah-qwen-bridge
+python seeder.py inject 1000    # 1,000 memorias
+python seeder.py benchmark     # Benchmark de búsqueda
 ```
 
 ---
 
-## API REST (bridge.php)
+## API REST (api.php)
 
 ### Endpoints
 
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
-| `GET` | `/bridge.php?action=status` | Estado del servicio |
-| `GET` | `/bridge.php?action=list&tier=hot` | Listar memorias |
-| `GET` | `/bridge.php?action=stats` | Estadísticas de tiers |
-| `POST` | `/bridge.php` | Guardar/buscar/eliminar |
+| `GET` | `/api.php?action=status` | Estado del servicio |
+| `GET` | `/api.php?action=list&collection=memories` | Listar memorias |
+| `GET` | `/api.php?action=stats` | Estadísticas de DataCore |
+| `POST` | `/api.php` | Guardar/buscar/eliminar |
 
 ### Acciones POST
 
 #### Guardar memoria
 
 ```bash
-curl -X POST http://localhost:8000/bridge.php \
+curl -X POST http://localhost:8000/api.php \
   -H "Content-Type: application/json" \
   -d '{
     "action": "save",
+    "collection": "memories",
     "tier": "hot",
-    "key": "user_123_preference",
-    "data": {"language": "PHP", "level": "expert"},
-    "tags": ["user", "preference", "php"]
+    "data": {"id": "key_001", "content": "...", "tags": ["a","b"]}
   }'
 ```
 
-#### Buscar memoria
+#### Buscar
 
 ```bash
-curl -X POST http://localhost:8000/bridge.php \
+curl -X POST http://localhost:8000/api.php \
   -H "Content-Type: application/json" \
-  -d '{
-    "action": "search",
-    "query": "PHP async patterns",
-    "tiers": ["hot", "warm"],
-    "limit": 10
-  }'
+  -d '{"action": "search", "collection": "memories", "query": "PHP async"}'
 ```
 
-#### Buscar por tags
+#### Batch insert
 
 ```bash
-curl -X POST http://localhost:8000/bridge.php \
+curl -X POST http://localhost:8000/api.php \
   -H "Content-Type: application/json" \
-  -d '{
-    "action": "tags",
-    "tags": ["php", "async"],
-    "tiers": ["hot", "warm", "cold"]
-  }'
+  -d '{"action": "batch", "collection": "memories", "docs": [{...}, {...}]}'
 ```
 
-#### Recuperar por clave
+#### Recuperar por ID
 
 ```bash
-curl "http://localhost:8000/bridge.php?action=retrieve&tier=hot&key=user_123_preference"
+curl -X POST http://localhost:8000/api.php \
+  -H "Content-Type: application/json" \
+  -d '{"action": "retrieve", "collection": "memories", "id": "key_001"}'
 ```
 
-#### Eliminar
+#### Eliminar (soft-delete)
 
 ```bash
-curl -X POST http://localhost:8000/bridge.php \
+curl -X POST http://localhost:8000/api.php \
   -H "Content-Type: application/json" \
-  -d '{"action": "delete", "key": "user_123_preference"}'
+  -d '{"action": "delete", "collection": "memories", "id": "key_001"}'
 ```
 
-#### Mover entre tiers
+#### MemoryPyramid
 
 ```bash
-curl -X POST http://localhost:8000/bridge.php \
+# Set en cache LRU
+curl -X POST http://localhost:8000/api.php \
   -H "Content-Type: application/json" \
-  -d '{"action": "move", "key": "user_123_preference", "to_tier": "warm"}'
-```
+  -d '{"action": "pyramid_set", "key": "k1", "value": {...}, "ttl": 3600}'
 
-#### Forzar migración
-
-```bash
-curl -X POST http://localhost:8000/bridge.php \
+# Get desde cache
+curl -X POST http://localhost:8000/api.php \
   -H "Content-Type: application/json" \
-  -d '{"action": "migrate"}'
+  -d '{"action": "pyramid_get", "key": "k1"}'
 ```
 
 ---
@@ -282,27 +320,28 @@ pip install -e .
 from jah_bridge import JahMemoryBridge, JahQwenAgent
 
 # Conectar al API PHP
-bridge = JahMemoryBridge("http://localhost:8000/bridge.php")
+bridge = JahMemoryBridge("http://localhost:8000/api.php")
 
-# Guardar memoria
-bridge.save_memory("hot", "session_001", {
+# Guardar memoria (se almacena en formato binario internamente)
+bridge.save_memory("hot", "user_123", {
     "query": "¿Cómo usar PHP Fibers?",
     "response": "Las Fibers permiten concurrencia cooperativa..."
 }, tags=["php", "async", "fibers"])
 
-# Buscar memoria
-results = bridge.search_memory("PHP Fibers", tiers=["hot", "warm"])
+# Buscar
+results = bridge.search_memory("PHP Fibers")
 for r in results:
-    print(f"[{r.tier}] {r.key} (score: {r.score}): {r.data}")
+    print(f"[{r.tier}] {r.id}: {r.data}")
+
+# Batch insert (alto rendimiento)
+docs = [{"id": f"doc_{i}", "content": f"Memory #{i}"} for i in range(1000)]
+bridge.batch_save(docs)
 ```
 
 ### Agente completo con Qwen
 
 ```python
-from jah_bridge import JahMemoryBridge, JahQwenAgent
-
 def call_qwen(prompt: str) -> str:
-    # Tu implementación de llamada a Qwen
     import openai
     response = openai.chat.completions.create(
         model="qwen-7b",
@@ -310,29 +349,16 @@ def call_qwen(prompt: str) -> str:
     )
     return response.choices[0].message.content
 
-bridge = JahMemoryBridge("http://localhost:8000/bridge.php")
+bridge = JahMemoryBridge("http://localhost:8000/api.php")
 agent = JahQwenAgent(bridge, llm_callable=call_qwen)
 
 # El agente automáticamente:
-# 1. Busca contexto en memoria
+# 1. Busca contexto en memoria (DataCore binario)
 # 2. Construye el prompt con contexto
 # 3. Llama a Qwen
 # 4. Guarda la interacción en hot/
 result = agent.process("¿Qué sabes sobre PHP async?")
 print(result["response"])
-```
-
-### Inyección masiva (para demos)
-
-```bash
-# Inyectar 1000 memorias de prueba
-python seeder.py inject 1000
-
-# Benchmark de búsqueda
-python seeder.py benchmark
-
-# Ver estadísticas
-python seeder.py stats
 ```
 
 ---
@@ -344,7 +370,7 @@ El motor opera en 12 fases con 11 agentes especializados:
 | Fase | Agente | Responsabilidad |
 |------|--------|-----------------|
 | 1 | GatewayAgent | Validación de requests entrantes |
-| 2 | MemoryAgent | Persistencia en MySQL + tiered memory |
+| 2 | MemoryAgent | Persistencia en MySQL + DataCore + tiered |
 | 3 | ObserverAgent | Monitoreo de CPU/RAM/Disco |
 | 4 | PredictorAgent | Predicción de carga y estrategias |
 | 5 | OrchestratorAgent | División y delegación de tareas |
@@ -356,39 +382,6 @@ El motor opera en 12 fases con 11 agentes especializados:
 | 11 | OptimizerAgent | Recomendaciones de optimización |
 | 12 | CleanerAgent | Purga de temporales y caché expirada |
 
-### Flujo de ejecución
-
-```
-Evento (HTTP/CLI)
-    │
-    ▼
-[GatewayAgent] → Valida estructura
-    │
-    ▼
-[ObserverAgent] → Evalúa recursos del sistema
-    │
-    ▼
-[PredictorAgent] → Determina estrategia óptima
-    │
-    ▼
-[OrchestratorAgent] → Divide en subtareas
-    │
-    ▼
-[WorkerAgent] → Ejecuta tareas en paralelo
-    │
-    ▼
-[AnalystAgent] → Audita resultados
-    │
-    ▼
-[MemoryAgent] → Persiste en MySQL + tiered
-    │
-    ▼
-[OptimizerAgent] → Genera recomendaciones
-    │
-    ▼
-[CleanerAgent] → Limpia temporales
-```
-
 ---
 
 ## Configuración
@@ -397,15 +390,14 @@ Variables de entorno principales:
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
-| `JAH_ENV` | `production` | Entorno (production/development) |
+| `JAH_ENV` | `production` | Entorno |
 | `JAH_DEBUG` | `false` | Modo debug |
 | `JAH_DB_HOST` | `127.0.0.1` | Host MySQL |
-| `JAH_DB_NAME` | `jah_motor` | Nombre de la base de datos |
-| `JAH_DB_USER` | `root` | Usuario MySQL |
-| `JAH_DB_PASS` | — | Contraseña MySQL (requerida) |
+| `JAH_DB_NAME` | `jah_motor` | Base de datos |
+| `JAH_DB_PASS` | — | Contraseña MySQL |
+| `JAH_DATACORE_STORAGE` | `memory/datacore` | Directorio DataCore |
+| `JAH_HOT_STORAGE` | `memory/pyramid` | Directorio MemoryPyramid |
 | `JAH_LOG_LEVEL` | `warning` | Nivel de log |
-| `JAH_TIERED_MEMORY_DIR` | `memory/tiers` | Directorio de memoria |
-| `JAH_MAX_WORKERS` | `4` | Workers concurrentes |
 
 ---
 
@@ -414,33 +406,33 @@ Variables de entorno principales:
 ### Mostrar velocidad de recuperación
 
 ```bash
-# 1. Inyectar 1,000 memorias
+# 1. Inyectar 1,000 memorias en formato binario
 cd jah-qwen-bridge
 python seeder.py inject 1000
 
-# 2. Mostrar estadísticas
-python seeder.py stats
+# 2. Mostrar estadísticas de DataCore
+curl http://localhost:8000/api.php?action=stats
 
-# 3. Benchmark de búsqueda (comparar con SQL)
+# 3. Benchmark de búsqueda
 python seeder.py benchmark
 ```
 
 ### Mostrar ciclo de vida de la memoria
 
 ```bash
-# Ver datos en hot/
-ls jah-php/memory/tiers/hot/
+# Ver datos binarios en DataCore
+ls jah-php/memory/datacore/data/
 
 # Forzar migración (hot → warm → cold)
 php jah-php/migrate_tiers.php migrate
 
-# Ver datos migrados
-ls jah-php/memory/tiers/warm/
+# Ver estadísticas
+php jah-php/migrate_tiers.php stats
 ```
 
 ### Argumento de venta
 
-> "Hemos eliminado el cuello de botella de la base de datos. Nuestra memoria es el sistema de archivos, gestionado por PHP, orquestado por Qwen."
+> "Hemos eliminado el cuello de botella de la base de datos. Nuestro almacenamiento es binario, segmentado por hash, con índices en memoria y compresión LZ4/ZSTD. 27,700x más rápido que SQLite3."
 
 ---
 

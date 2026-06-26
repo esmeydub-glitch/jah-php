@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Jah Memory Seeder — Inject bulk memories into Jah-PHP for benchmarking.
-Useful for hackathon demo showing 1000+ instant retrievals.
+Jah Memory Seeder — Bulk inject memories into Jah-PHP DataCore.
+For hackathon demo: 1000+ instant retrievals.
 """
 
 import json
@@ -12,15 +12,15 @@ import random
 import string
 import requests
 
-API_URL = os.environ.get("JAH_API_URL", "http://localhost/jah-php/bridge.php")
+API_URL = os.environ.get("JAH_API_URL", "http://localhost/jah-php/api.php")
 
 
 def random_string(length: int = 8) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
-def generate_memories(count: int = 1000, batch_size: int = 50) -> dict:
-    """Generate and inject test memories."""
+def generate_memories(count: int = 1000, batch_size: int = 500) -> dict:
+    """Generate and inject test memories using batch endpoint."""
     tiers = ["hot", "warm", "cold"]
     topics = [
         ("php", ["async", "fibers", "swoole", "react", "worker", "process"]),
@@ -29,50 +29,47 @@ def generate_memories(count: int = 1000, batch_size: int = 50) -> dict:
         ("dev", ["testing", "deploy", "ci", "docker", "kubernetes", "monitor"]),
     ]
 
-    stats = {"success": 0, "failed": 0, "time_seconds": 0}
+    stats = {"success": 0, "failed": 0, "time_seconds": 0, "batches": 0}
     start = time.time()
 
-    print(f"Injecting {count} memories into Jah-PHP...")
+    print(f"Injecting {count} memories into Jah-PHP DataCore...")
 
+    batch = []
     for i in range(count):
-        tier = random.choice(tops)
+        tier = random.choice(tiers)
         topic_category, keywords = random.choice(topics)
         keyword = random.choice(keywords)
         key = f"{topic_category}_{keyword}_{random_string(6)}"
 
-        data = {
-            "id": i,
+        doc = {
+            "id": key,
             "category": topic_category,
             "topic": keyword,
             "content": f"Memory #{i}: {keyword} in {topic_category} — generated at {time.time()}",
-            "metadata": {
-                "batch": i // batch_size,
-                "index": i,
-            },
+            "metadata": {"batch": i // batch_size, "index": i},
+            "tags": [topic_category, keyword, tier],
         }
 
-        tags = [topic_category, keyword, tier]
+        batch.append(doc)
 
-        try:
-            response = requests.post(
-                API_URL,
-                json={
-                    "action": "save",
-                    "tier": tier,
-                    "key": key,
-                    "data": data,
-                    "tags": tags,
-                },
-                timeout=5,
-            )
-            if response.status_code == 200:
-                stats["success"] += 1
-            else:
-                stats["failed"] += 1
-        except Exception:
-            stats["failed"] += 1
+        if len(batch) >= batch_size or i == count - 1:
+            try:
+                response = requests.post(
+                    API_URL,
+                    json={"action": "batch", "collection": "memories", "docs": batch},
+                    timeout=30,
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    stats["success"] += result.get("inserted", len(batch))
+                else:
+                    stats["failed"] += len(batch)
+            except Exception as e:
+                stats["failed"] += len(batch)
 
-        if (i + 1) % 100 == 0:
+            stats["batches"] += 1
+            batch = []
+
             elapsed = time.time() - start
             rate = (i + 1) / elapsed if elapsed > 0 else 0
             print(f"  Progress: {i+1}/{count} ({rate:.0f} ops/sec, {elapsed:.1f}s)")
@@ -96,8 +93,8 @@ def benchmark_search(iterations: int = 100) -> dict:
 
         try:
             requests.post(
-                f"{API_URL}",
-                json={"action": "search", "query": query, "limit": 10},
+                API_URL,
+                json={"action": "search", "collection": "memories", "query": query, "limit": 10},
                 timeout=5,
             )
             search_times.append(time.time() - start)

@@ -34,6 +34,8 @@ return [
         'tmp' => (string) jah_env('JAH_TMP_DIR', dirname(__DIR__) . '/tmp'),
         'cache' => (string) jah_env('JAH_CACHE_DIR', dirname(__DIR__) . '/cache/store'),
         'tiered_memory' => (string) jah_env('JAH_TIERED_MEMORY_DIR', dirname(__DIR__) . '/memory/tiers'),
+        'datacore_storage' => (string) jah_env('JAH_DATACORE_STORAGE', dirname(__DIR__) . '/memory/datacore'),
+        'hot_storage' => (string) jah_env('JAH_HOT_STORAGE', dirname(__DIR__) . '/memory/pyramid'),
     ],
     'tiered_memory_config' => [
         'hot' => ['ttl' => 3600, 'max_files' => 1000],
