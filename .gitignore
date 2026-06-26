@@ -1,5 +1,53 @@
-# Config with secrets
-jah php/config/qwen.php
-config/qwen.php
+# Secrets and config
 .env
 .env.local
+.env.*
+*.secret
+jah php/config/qwen.php
+config/qwen.php
+
+# Runtime data - binary memory
+*.bin
+*.dat
+*.ndjson
+*.idx
+*.gz
+jah php/memory/datacore/data/
+jah php/memory/datacore/index/
+jah php/memory/datacore/wal/
+jah php/memory/pyramid/hot/
+jah php/memory/pyramid/warm/
+jah php/memory/pyramid/cold/
+jah php/memory/tiers/hot/
+jah php/memory/tiers/warm/
+jah php/memory/tiers/cold/
+
+# Logs
+*.log
+logs/
+jah php/logs/
+
+# Temp
+*.tmp
+*.temp
+tmp/
+jah php/tmp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
