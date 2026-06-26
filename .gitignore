@@ -4,6 +4,7 @@
 .env.*
 *.secret
 jah php/config/qwen.php
+jah-php/config/qwen.php
 config/qwen.php
 
 # Runtime data - binary memory

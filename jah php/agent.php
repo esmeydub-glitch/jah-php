@@ -60,9 +60,6 @@ if (!is_file($configFile)) {
 
 $config = require $configFile;
 
-$engine = JahEngine::getInstance();
-$engine->boot($config);
-
 $storagePath = $config['paths']['datacore_storage'] ?? $basePath . '/memory/datacore';
 $hotStoragePath = $config['paths']['hot_storage'] ?? $basePath . '/memory/pyramid';
 
@@ -99,17 +96,32 @@ foreach ($hotResults as $item) {
 $contextString = implode("\n", array_slice($contextItems, 0, 10));
 
 $qwenConfigFile = $basePath . '/config/qwen.php';
-$qwenConfig = is_file($qwenConfigFile) ? require $qwenConfigFile : [];
+$configApiKey = '';
+$configModel = 'qwen-max';
+if (is_file($qwenConfigFile) && is_readable($qwenConfigFile)) {
+    $content = file_get_contents($qwenConfigFile);
+    $content = preg_replace('/^<\?php/', '', $content);
+    $content = preg_replace('/\?>$/', '', $content);
+    $qwenConfig = eval($content);
+    if (is_array($qwenConfig)) {
+        $configApiKey = $qwenConfig['api_key'] ?? '';
+        $configModel = $qwenConfig['model'] ?? 'qwen-max';
+    }
+}
 
-$apiKey = $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?? $qwenConfig['api_key'] ?? '';
+$envApiKey = $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?? '';
+if ($envApiKey === false) {
+    $envApiKey = '';
+}
+$apiKey = $envApiKey !== '' ? $envApiKey : $configApiKey;
+$model = $configModel;
 
 if (empty($apiKey)) {
     http_response_code(500);
     echo json_encode([
-        'error' => 'QWEN_API_KEY not configured. Set QWEN_API_KEY environment variable.',
+        'error' => 'QWEN_API_KEY not configured. Set QWEN_API_KEY environment variable or edit config/qwen.php.',
     ], JSON_THROW_ON_ERROR);
     $turbo->close();
-    $engine->shutdown();
     exit;
 }
 
@@ -144,7 +156,6 @@ $memoryPyramid->set($userMemoryId, ['role' => 'user', 'content' => $userMessage]
 $memoryPyramid->set($assistantMemoryId, ['role' => 'assistant', 'content' => $response]);
 
 $turbo->close();
-$engine->shutdown();
 
 echo json_encode([
     'status' => 'success',
