@@ -101,12 +101,12 @@ $contextString = implode("\n", array_slice($contextItems, 0, 10));
 $qwenConfigFile = $basePath . '/config/qwen.php';
 $qwenConfig = is_file($qwenConfigFile) ? require $qwenConfigFile : [];
 
-$apiKey = $qwenConfig['api_key'] ?? $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?? '';
+$apiKey = $_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?? $qwenConfig['api_key'] ?? '';
 
 if (empty($apiKey)) {
     http_response_code(500);
     echo json_encode([
-        'error' => 'QWEN_API_KEY not configured. Set JAWEN_API_KEY env var or edit config/qwen.php.',
+        'error' => 'QWEN_API_KEY not configured. Set QWEN_API_KEY environment variable.',
     ], JSON_THROW_ON_ERROR);
     $turbo->close();
     $engine->shutdown();

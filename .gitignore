@@ -1,31 +1,5 @@
-
-# Runtime data
-jah php/memory/datacore/data/
-jah php/memory/datacore/index/
-jah php/memory/datacore/wal/
-jah php/memory/pyramid/hot/
-jah php/memory/pyramid/warm/
-jah php/memory/pyramid/cold/
-jah php/memory/tiers/hot/
-jah php/memory/tiers/warm/
-jah php/memory/tiers/cold/
-
-# Logs
-jah php/logs/*.log
-
-# Temp
-jah php/tmp/
-*.tmp
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-.eggs/
-dist/
-build/
+# Config with secrets
+jah php/config/qwen.php
+config/qwen.php
+.env
+.env.local
