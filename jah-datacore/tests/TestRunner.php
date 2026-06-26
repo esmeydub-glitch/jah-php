@@ -205,4 +205,18 @@ final class TestRunner
     }
 }
 
-// Run via tests/run.php
+// Run
+$runner = new TestRunner();
+$results = $runner->run();
+$runner->cleanup();
+
+echo "\n=== SUMMARY ===\n";
+$passed = count(array_filter($results, fn($r) => $r['ok']));
+$total = count($results);
+echo "Passed: {$passed}/{$total}\n";
+
+if ($passed === $total) {
+    echo "ALL TESTS PASSED\n";
+    exit(0);
+}
+exit(1);
