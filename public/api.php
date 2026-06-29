@@ -26,6 +26,7 @@ $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $input = [];
 $action = $method === 'GET' ? 'status' : 'chat';
 $collection = 'memories';
+$conversationId = 'api-memories';
 
 try {
     RequestGuard::assertMethod($method, (array)($config['security']['allowed_methods'] ?? ['GET', 'POST']));
@@ -36,6 +37,10 @@ try {
         throw new RuntimeException('Acción inválida');
     }
     $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($input['collection'] ?? 'memories')) ?: 'memories';
+    $conversationId = trim((string)($input['conversation_id'] ?? ('api-' . $collection)));
+    if (strlen($conversationId) > 128 || preg_match('/^[a-zA-Z0-9_.-]+$/', $conversationId) !== 1) {
+        throw new RuntimeException('conversation_id inválido');
+    }
     $readActions = ['status', 'salk_status', 'salk_package_vectors', 'stats', 'retrieve', 'get', 'search'];
     if ($method !== 'POST' && !in_array($action, $readActions, true)) {
         throw new RuntimeException('Esta acción requiere POST');
@@ -167,7 +172,7 @@ try {
             $message = trim((string)($input['message'] ?? ''));
             if ($message === '') throw new RuntimeException('message required');
             $model = (string)($input['model'] ?? $config['qwen']['model'] ?? 'qwen-max');
-            $agent = $runtime->runAgent($message, $collection, $model);
+            $agent = $runtime->runAgent($message, $collection, $model, $conversationId);
             $agentOk = !($agent['blocked_by_salk'] ?? false) && !($agent['qwen_failed'] ?? false);
             $output = array_merge(['status' => $agentOk ? 'success' : 'error', 'model' => $model], $agent);
             break;

@@ -11,6 +11,7 @@ use Jah\Http\RequestGuard;
 $request = array_merge($_GET, $_POST);
 $requestedAction = (string)($request['action'] ?? 'chat');
 $csrfToken = RequestGuard::csrfToken();
+$conversationId = RequestGuard::conversationId();
 $loginError = '';
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
@@ -68,6 +69,8 @@ $response = '';
 $searchResults = [];
 $statsData = null;
 $contextPreview = '';
+$conversationUsed = 0;
+$conversationStoredResult = [];
 $memoryResults = [];
 $actionsTrace = [];
 $classificationResult = [];
@@ -143,9 +146,16 @@ switch ($action) {
     default:
         $action = 'chat';
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && $message !== '') {
-            $result = $runtime->runAgent($message, $collection, (string)($config['qwen']['model'] ?? 'qwen-max'));
+            $result = $runtime->runAgent(
+                $message,
+                $collection,
+                (string)($config['qwen']['model'] ?? 'qwen-max'),
+                $conversationId
+            );
             $response = (string)($result['response'] ?? '');
             $contextPreview = (string)($result['context_preview'] ?? '');
+            $conversationUsed = (int)($result['conversation_used'] ?? 0);
+            $conversationStoredResult = is_array($result['conversation_stored'] ?? null) ? $result['conversation_stored'] : [];
             $memoryResults = is_array($result['memories'] ?? null) ? $result['memories'] : [];
             $actionsTrace = is_array($result['actions_trace'] ?? null) ? $result['actions_trace'] : [];
             $classificationResult = is_array($result['classification'] ?? null) ? $result['classification'] : [];
@@ -240,9 +250,16 @@ function brief(mixed $value, int $length = 220): string {
     <h2>Respuesta Qwen / Qwen response</h2>
     <div class="response"><?= nl2br(e($response)) ?></div>
 
-    <h2>Decisión de memoria / Memory decision</h2>
+    <h2>Memoria conversacional / Conversation memory</h2>
+    <div class="item hot">
+        <strong>Conversación activa:</strong> <?= e(($conversationStoredResult['stored'] ?? false) ? 'sí / yes' : 'no') ?><br>
+        <strong>Pirámide:</strong> <?= e($conversationStoredResult['tier'] ?? 'hot_warm') ?><br>
+        <strong>Turnos almacenados:</strong> <?= e($conversationStoredResult['turn_count'] ?? 0) ?>
+    </div>
+
+    <h2>Decisión de memoria importante / Durable memory decision</h2>
     <div class="item">
-        <strong>Guardar / Store:</strong> <?= e(($classificationResult['store'] ?? false) ? 'sí / yes' : 'no') ?><br>
+        <strong>Guardar en Warm/Cold:</strong> <?= e(($classificationResult['store'] ?? false) ? 'sí / yes' : 'no') ?><br>
         <strong>Tipo / Type:</strong> <?= e($classificationResult['type'] ?? 'N/A') ?><br>
         <strong>Razón / Reason:</strong> <?= e($classificationResult['reason'] ?? 'N/A') ?><br>
         <strong>Resultado de guardado / Store result:</strong> <?= e(php_dump($storedResult)) ?>
@@ -260,6 +277,10 @@ function brief(mixed $value, int $length = 220): string {
     <?php endforeach; endif; ?>
 
     <h2>Contexto enviado a Qwen / Context sent to Qwen</h2>
+    <div class="item hot">
+        <strong>Conversación / Conversation:</strong> <?= e($conversationId) ?><br>
+        <strong>Turnos previos usados / Previous turns used:</strong> <?= e($conversationUsed) ?>
+    </div>
     <pre><?= e($contextPreview) ?></pre>
 
     <h2>SALK Security</h2>

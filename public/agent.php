@@ -32,6 +32,11 @@ if ($userMessage === '') {
 }
 
 $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($input['collection'] ?? 'memories')) ?: 'memories';
+$conversationId = trim((string)($input['conversation_id'] ?? ('api-' . $collection)));
+if (strlen($conversationId) > 128 || preg_match('/^[a-zA-Z0-9_.-]+$/', $conversationId) !== 1) {
+    JahTransport::respond(['status' => 'error', 'error' => 'Invalid conversation_id.'], null, 400);
+    exit;
+}
 $model = (string)($input['model'] ?? $config['qwen']['model'] ?? getenv('QWEN_MODEL') ?: 'qwen-max');
 
 $storagePath = (string)$config['paths']['datacore_storage'];
@@ -41,13 +46,16 @@ $tiered = new TieredMemory($storagePath, $hotStoragePath);
 require_once dirname(__DIR__) . '/app/actions/MemoryActionScript.php';
 $runtime = new MemoryActionScript($tiered, $config);
 
-$result = $runtime->runAgent($userMessage, $collection, $model);
+$result = $runtime->runAgent($userMessage, $collection, $model, $conversationId);
 
 $output = [
     'status' => 'success',
     'response' => $result['response'],
     'model' => $model,
     'context_used' => $result['context_used'],
+    'conversation_used' => $result['conversation_used'] ?? 0,
+    'conversation_id' => $result['conversation_id'] ?? $conversationId,
+    'conversation_stored' => $result['conversation_stored'] ?? [],
     'context_preview' => $result['context_preview'],
     'memories' => $result['memories'],
     'memory_search' => $result['memory_search'] ?? [],

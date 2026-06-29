@@ -30,9 +30,15 @@ final class MemoryActionScript
         $this->registerActions();
     }
 
-    public function runAgent(string $message, string $collection = 'memories', string $model = 'qwen-max'): array
+    public function runAgent(
+        string $message,
+        string $collection = 'memories',
+        string $model = 'qwen-max',
+        string $conversationId = 'default'
+    ): array
     {
         $trace = [];
+        $conversationId = $this->normalizeConversationId($conversationId);
 
         $salkPreflight = $this->run('salk.preflight', [
             'context' => 'memoryagent.run',
@@ -66,6 +72,12 @@ final class MemoryActionScript
         ]);
         $trace[] = $this->traceFromResult($classification);
 
+        $conversation = $this->run('memory.load_conversation', [
+            'conversation_id' => $conversationId,
+            'collection' => $collection,
+        ]);
+        $trace[] = $this->traceFromResult($conversation);
+
         $retrieved = $this->run('memory.search_context', [
             'query' => $message,
             'collection' => $collection,
@@ -76,6 +88,7 @@ final class MemoryActionScript
         $context = $this->run('memory.build_context', [
             'message' => $message,
             'memories' => $retrieved['result']['memories'] ?? [],
+            'conversation' => $conversation['result']['turns'] ?? [],
             'classification' => $classification['result'] ?? [],
         ]);
         $trace[] = $this->traceFromResult($context);
@@ -103,6 +116,8 @@ final class MemoryActionScript
                 'blocked_by_salk' => $answerBlocked,
                 'qwen_failed' => !$answerBlocked,
                 'context_used' => count($retrieved['result']['memories'] ?? []),
+                'conversation_used' => count($conversation['result']['turns'] ?? []),
+                'conversation_id' => $conversationId,
                 'context_preview' => $context['result']['context'] ?? '',
                 'memories' => $retrieved['result']['memories'] ?? [],
                 'memory_search' => $retrieved['result']['metrics'] ?? [],
@@ -112,6 +127,14 @@ final class MemoryActionScript
                 'salk' => ['preflight' => $salkPreflight['result'] ?? [], 'audit' => $audit['result'] ?? []],
             ]);
         }
+
+        $conversationStore = $this->run('memory.store_conversation', [
+            'conversation_id' => $conversationId,
+            'collection' => $collection,
+            'message' => $message,
+            'response' => $answer['result']['response'] ?? '',
+        ]);
+        $trace[] = $this->traceFromResult($conversationStore);
 
         $store = $this->run('memory.store_interaction', [
             'message' => $message,
@@ -129,6 +152,7 @@ final class MemoryActionScript
                 'classification' => $classification['result']['type'] ?? 'unknown',
                 'stored' => $store['result']['stored'] ?? false,
                 'context_used' => count($retrieved['result']['memories'] ?? []),
+                'conversation_used' => count($conversation['result']['turns'] ?? []),
             ],
         ]);
         $trace[] = $this->traceFromResult($audit);
@@ -138,6 +162,9 @@ final class MemoryActionScript
         return $this->salk->maskSecrets([
             'response' => $answer['result']['response'] ?? ($answer['error'] ?? 'Sin respuesta.'),
             'context_used' => count($retrieved['result']['memories'] ?? []),
+            'conversation_used' => count($conversation['result']['turns'] ?? []),
+            'conversation_id' => $conversationId,
+            'conversation_stored' => $conversationStore['result'] ?? [],
             'context_preview' => $context['result']['context'] ?? '',
             'memories' => $retrieved['result']['memories'] ?? [],
             'memory_search' => $retrieved['result']['metrics'] ?? [],
@@ -239,6 +266,51 @@ final class MemoryActionScript
                 ];
             });
 
+        ActionScript::define('memory.load_conversation')
+            ->requires(['conversation_id'])
+            ->timeout(1000)
+            ->handler(function (array $data): array {
+                $conversationId = $this->normalizeConversationId((string)$data['conversation_id']);
+                $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
+                $turns = $this->memory->conversationTurns($conversationId, $collection);
+                return [
+                    'conversation_id' => $conversationId,
+                    'turns' => $this->salk->maskSecrets($turns),
+                    'count' => count($turns),
+                    'hot_count' => count(array_filter($turns, static fn(array $turn): bool => ($turn['_conversation_tier'] ?? '') === 'hot')),
+                    'warm_count' => count(array_filter($turns, static fn(array $turn): bool => ($turn['_conversation_tier'] ?? '') === 'warm')),
+                ];
+            });
+
+        ActionScript::define('memory.store_conversation')
+            ->requires(['conversation_id', 'message', 'response'])
+            ->timeout(3000)
+            ->handler(function (array $data): array {
+                $conversationId = $this->normalizeConversationId((string)$data['conversation_id']);
+                $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
+                $message = trim((string)$data['message']);
+                $response = trim((string)$data['response']);
+                if ($this->salk->containsSecret($message) || $this->salk->containsSecret($response)) {
+                    return ['stored' => false, 'reason' => 'secret_detected_not_stored', 'tier' => null];
+                }
+                $this->memory->appendConversationExchange(
+                    $conversationId,
+                    $this->salk->maskText($message),
+                    $this->salk->maskText($response),
+                    $collection,
+                    (int)($this->config['memory']['hot_conversation_chars'] ?? 8000)
+                );
+                $turns = $this->memory->conversationTurns($conversationId, $collection);
+                $warmCount = count(array_filter($turns, static fn(array $turn): bool => ($turn['_conversation_tier'] ?? '') === 'warm'));
+                return [
+                    'stored' => true,
+                    'conversation_id' => $conversationId,
+                    'turn_count' => count($turns),
+                    'tier' => $warmCount > 0 ? 'hot+warm' : 'hot',
+                    'warm_count' => $warmCount,
+                ];
+            });
+
         ActionScript::define('memory.build_context')
             ->requires(['message', 'memories'])
             ->timeout(1000)
@@ -246,19 +318,24 @@ final class MemoryActionScript
                 $date = new DateTimeImmutable('now', new DateTimeZone((string)($this->config['timezone'] ?? 'America/Mexico_City')));
                 $lines = ['Fecha actual: ' . $date->format('Y-m-d H:i:s T')];
 
-                $classification = is_array($data['classification'] ?? null) ? $data['classification'] : [];
-                if ($classification !== []) {
-                    $lines[] = 'Decision de memoria: ' . (($classification['store'] ?? false) ? 'guardar' : 'no guardar')
-                        . ' | tipo=' . (string)($classification['type'] ?? 'unknown')
-                        . ' | razon=' . (string)($classification['reason'] ?? 'n/a');
-                }
-
                 $memories = is_array($data['memories']) ? $data['memories'] : [];
 
-                if ($memories === []) {
-                    $lines[] = 'Memorias recuperadas: ninguna.';
-                } else {
-                    $lines[] = 'Memorias recuperadas:';
+                $conversation = is_array($data['conversation'] ?? null) ? $data['conversation'] : [];
+                if ($conversation !== []) {
+                    $lines[] = 'Conversacion disponible, en orden cronologico:';
+                    foreach ($conversation as $turn) {
+                        if (!is_array($turn)) continue;
+                        $role = (string)($turn['role'] ?? 'user');
+                        $label = $role === 'assistant' ? 'Asistente' : 'Usuario';
+                        $tier = (string)($turn['_conversation_tier'] ?? 'hot');
+                        $content = $this->salk->maskText((string)($turn['content'] ?? ''));
+                        if ($content !== '') $lines[] = '- [' . $tier . '] ' . $label . ': ' . substr($content, 0, 1000);
+                    }
+                    $lines[] = 'Continua de forma natural. Resuelve pronombres y referencias usando los turnos anteriores; no pidas contexto que ya este aqui.';
+                }
+
+                if ($memories !== []) {
+                    $lines[] = 'Memorias importantes recuperadas:';
                     foreach (array_slice($memories, 0, 10) as $item) {
                         if (!is_array($item)) continue;
                         $content = $item['content'] ?? var_export($item, true);
@@ -270,7 +347,12 @@ final class MemoryActionScript
                     }
                 }
 
-                return ['context' => implode("\n", $lines)];
+                $context = implode("\n", $lines);
+                $maxChars = max(2000, min((int)($this->config['memory']['context_max_chars'] ?? 12000), 30000));
+                if (strlen($context) > $maxChars) {
+                    $context = substr($context, -$maxChars);
+                }
+                return ['context' => $context];
             });
 
         ActionScript::define('qwen.ask')
@@ -347,6 +429,9 @@ final class MemoryActionScript
                     : 'memory_' . bin2hex(random_bytes(6));
                 $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
                 $memoryContent = $storeResponse ? $response : $message;
+                $isPermanent = (bool)($classification['permanent'] ?? false)
+                    || (int)($classification['importance'] ?? 0) >= 7;
+                $memoryTier = $isPermanent ? 'cold' : 'warm';
                 $this->memory->store($uid, [
                     'role' => $storeResponse ? 'memory' : 'user',
                     'content' => $this->salk->maskText($memoryContent),
@@ -360,7 +445,7 @@ final class MemoryActionScript
                     'importance' => (int)($classification['importance'] ?? 5),
                     'classification_reason' => (string)($classification['reason'] ?? 'stored'),
                     '_ts' => $now,
-                ], 'hot', $collection);
+                ], $memoryTier, $collection);
 
                 return [
                     'stored' => true,
@@ -371,7 +456,7 @@ final class MemoryActionScript
                     'stored_source' => $storeResponse ? 'qwen_response' : 'user_input',
                     'type' => (string)$classification['type'],
                     'importance' => (int)($classification['importance'] ?? 5),
-                    'tier' => 'hot',
+                    'tier' => $memoryTier,
                 ];
             });
 
@@ -497,6 +582,11 @@ final class MemoryActionScript
             ];
         }
 
+        $explicitPermanent = $this->containsAny($normalized, [
+            'recuerda', 'guardalo', 'guardala', 'guarda esto', 'guarda en memoria',
+            'guardar en memoria', 'memoria:', 'memory:'
+        ]);
+
         if ($this->containsAny($normalized, [
             'resumen', 'resumeme', 'resume el', 'resume la', 'haz un resumen',
             'sinopsis', 'de que trata', 'summary', 'summarize'
@@ -506,15 +596,17 @@ final class MemoryActionScript
                 'store_response' => true,
                 'type' => 'knowledge_summary',
                 'importance' => 6,
+                'permanent' => $explicitPermanent,
                 'reason' => 'reusable_generated_knowledge',
             ];
         }
 
-        if ($this->containsAny($normalized, ['recuerda', 'guarda en memoria', 'memoria:', 'memory:'])) {
+        if ($explicitPermanent) {
             return [
                 'store' => true,
                 'type' => 'explicit_memory',
                 'importance' => 9,
+                'permanent' => true,
                 'reason' => 'explicit_memory_instruction',
             ];
         }
@@ -563,6 +655,15 @@ final class MemoryActionScript
             '¿' => '', '?' => '', '¡' => '', '!' => '', '.' => '', ',' => '', ';' => '', ':' => '',
         ]);
         return preg_replace('/\s+/', ' ', $text) ?: '';
+    }
+
+    private function normalizeConversationId(string $conversationId): string
+    {
+        $conversationId = trim($conversationId);
+        if ($conversationId === '' || strlen($conversationId) > 128 || preg_match('/^[a-zA-Z0-9_.-]+$/', $conversationId) !== 1) {
+            throw new InvalidArgumentException('ID de conversación inválido');
+        }
+        return $conversationId;
     }
 
     private function containsAny(string $text, array $needles): bool

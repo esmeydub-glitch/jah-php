@@ -23,11 +23,11 @@ class QwenConnector
             throw new RuntimeException('PHP cURL no está disponible. Qwen Cloud requiere cURL nativo de PHP.');
         }
 
-        $systemPrompt = "You are Qwen, an AI assistant created by Alibaba Cloud. Always respond in Spanish. Use stored memory only when relevant. Never invent stored user preferences.";
+        $systemPrompt = "Eres Qwen, un asistente de IA creado por Alibaba Cloud. Responde siempre en español y conversa con naturalidad. Usa la conversación Hot/Warm para entender referencias a turnos anteriores y no pidas al usuario información que ya aparece allí. Usa la memoria Cold solo cuando sea relevante. Nunca inventes preferencias ni recuerdos.";
 
         $userMessage = $prompt;
         if ($context !== '') {
-            $userMessage = "<<<MEMORIA_RECUPERADA>>>{$context}\n<<<FIN_MEMORIA_RECUPERADA>>>\n\n<<<PREGUNTA>>>\n{$prompt}\n<<<FIN_PREGUNTA>>>\n\nResponde en español. Si la memoria recuperada contiene información relevante, úsala. Si no hay memoria suficiente, dilo con claridad.";
+            $userMessage = "<<<CONTEXTO_JAH>>>{$context}\n<<<FIN_CONTEXTO_JAH>>>\n\n<<<MENSAJE_ACTUAL>>>\n{$prompt}\n<<<FIN_MENSAJE_ACTUAL>>>\n\nResponde en español como continuación natural de la conversación. Si una referencia puede resolverse con el contexto JAH, hazlo directamente. Pide aclaración únicamente cuando existan varias interpretaciones reales.";
         }
 
         $data = [

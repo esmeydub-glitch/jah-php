@@ -5,7 +5,7 @@ Verified locally on 2026-06-28:
 ```text
 JAS compiler and bytecode: 7/7 PASS
 ActionScript runtime: 7/7 PASS
-MemoryAgent product: 17/17 PASS
+MemoryAgent product: 19/19 PASS
 PHP lint: PASS
 ```
 
@@ -25,6 +25,7 @@ find app public src php_actionscript_php_doc tests -name '*.php' -print0 | xargs
 - HOT, WARM and COLD storage with deduplicated retrieval.
 - Collection isolation, durable forgetting and tier migration.
 - Summary-request classification and generated Qwen-response persistence.
+- Session/API conversation IDs, natural Hot context, seven-day Warm history, and permanent rule/command-based Cold memory.
 - DataCore direct pointers, inverted postings, stale-update filtering and reindexing.
 - CSRF, API access-key and sensitive-field enforcement.
 - JAS parsing, bytecode integrity and ActionScript task execution.

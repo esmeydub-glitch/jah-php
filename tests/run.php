@@ -47,6 +47,8 @@ check('csrf_tokens_are_enforced', function () use ($base): void {
     putenv('JAH_SESSION_PATH=' . $base . '/sessions');
     $token = RequestGuard::csrfToken();
     RequestGuard::assertCsrf($token);
+    $conversationId = RequestGuard::conversationId();
+    expectTrue($conversationId === RequestGuard::conversationId(), 'browser conversation id changed inside the session');
     try {
         RequestGuard::assertCsrf('invalid');
     } catch (RuntimeException) {
@@ -75,6 +77,7 @@ check('book_summaries_store_generated_knowledge', function () use ($runtime): vo
     ]);
     expectTrue(($stored['result']['assistant_stored'] ?? false) === true, 'Qwen summary was not persisted');
     expectTrue(($stored['result']['stored_source'] ?? '') === 'qwen_response', 'wrong memory source was persisted');
+    expectTrue(($stored['result']['tier'] ?? '') === 'warm', 'non-permanent generated knowledge was not routed to seven-day Warm memory');
 
     $updated = ActionScript::run('memory.store_interaction', [
         'message' => $message,
@@ -88,6 +91,40 @@ check('book_summaries_store_generated_knowledge', function () use ($runtime): vo
     $memories = $found['result']['memories'] ?? [];
     expectTrue(count($memories) === 1, 'stored book summary was not retrievable');
     expectTrue(str_contains((string)($memories[0]['content'] ?? ''), 'autoconocimiento'), 'retrieved memory does not contain the latest generated summary');
+
+    $permanentMessage = 'Guarda en memoria un resumen de Siddhartha';
+    $permanentDecision = ActionScript::run('memory.classify_input', ['message' => $permanentMessage]);
+    expectTrue(($permanentDecision['result']['permanent'] ?? false) === true, 'explicit save intent was lost during summary classification');
+    $permanentSummary = ActionScript::run('memory.store_interaction', [
+        'message' => $permanentMessage,
+        'response' => 'Siddhartha explora la búsqueda espiritual y el aprendizaje por experiencia.',
+        'collection' => 'book-memory',
+        'classification' => $permanentDecision['result'] ?? [],
+    ]);
+    expectTrue(($permanentSummary['result']['tier'] ?? '') === 'cold', 'explicitly saved summary was not permanent Cold memory');
+});
+
+check('classification_routes_long_and_important_memory', function () use ($runtime): void {
+    $importantMessage = 'Recuerda que mi lenguaje favorito es PHP';
+    $importantDecision = ActionScript::run('memory.classify_input', ['message' => $importantMessage]);
+    $important = ActionScript::run('memory.store_interaction', [
+        'message' => $importantMessage,
+        'response' => 'Lo recordaré.',
+        'collection' => 'tier-routing',
+        'classification' => $importantDecision['result'] ?? [],
+    ]);
+    expectTrue(($important['result']['tier'] ?? '') === 'cold', 'explicit important memory was not routed to Cold');
+
+    $longMessage = str_repeat('Este es contexto extenso de una conversación de trabajo. ', 3);
+    $longDecision = ActionScript::run('memory.classify_input', ['message' => $longMessage]);
+    expectTrue(($longDecision['result']['type'] ?? '') === 'long_context', 'long conversation was not classified as long context');
+    $long = ActionScript::run('memory.store_interaction', [
+        'message' => $longMessage,
+        'response' => 'Contexto recibido.',
+        'collection' => 'tier-routing',
+        'classification' => $longDecision['result'] ?? [],
+    ]);
+    expectTrue(($long['result']['tier'] ?? '') === 'warm', 'long non-important context was not routed to Warm');
 });
 
 check('api_access_key_is_enforced', function () use ($config): void {
@@ -136,8 +173,17 @@ check('migration_respects_collection_and_tier', function () use ($runtime): void
     $second = $runtime->migrate('alpha');
     $record = $runtime->retrieve('old', 'alpha');
     expectTrue(($first['result']['hot_to_warm'] ?? 0) === 1, 'hot record did not migrate to warm');
-    expectTrue(($second['result']['warm_to_cold'] ?? 0) === 1, 'warm record did not migrate to cold');
-    expectTrue(($record['result']['memory']['_tier'] ?? '') === 'cold', 'migrated tier was not persisted');
+    expectTrue(($second['result']['warm_expired'] ?? -1) === 0, 'Warm record expired before seven days');
+    expectTrue(($record['result']['memory']['_tier'] ?? '') === 'warm', 'Warm record incorrectly became permanent Cold memory');
+
+    $runtime->save('expired-warm', ['content' => 'temporary', '_ts' => time() - 8 * 86400], 'warm', 'alpha');
+    $runtime->save('permanent-cold', ['content' => 'permanent', '_ts' => time() - 30 * 86400], 'cold', 'alpha');
+    expectTrue(($runtime->retrieve('expired-warm', 'alpha')['result']['found'] ?? true) === false, 'Warm TTL required a manual migration before hiding expired memory');
+    expectTrue(($runtime->search('temporary', 'alpha')['result']['memories'] ?? ['unexpected']) === [], 'expired Warm memory appeared in search');
+    $expiry = $runtime->migrate('alpha');
+    expectTrue(($expiry['result']['warm_expired'] ?? 0) === 1, 'Warm memory did not expire after seven days');
+    expectTrue(($runtime->retrieve('expired-warm', 'alpha')['result']['found'] ?? true) === false, 'expired Warm memory remained retrievable');
+    expectTrue(($runtime->retrieve('permanent-cold', 'alpha')['result']['found'] ?? false) === true, 'permanent Cold memory expired');
 });
 
 check('sensitive_fields_are_rejected', function () use ($runtime): void {
@@ -240,6 +286,83 @@ check('transformer_map_performs_declared_mapping', function () use ($base): void
     ]);
     $mapped = $factory->execute('project-fields', [['name' => 'memory', 'value' => 9]]);
     expectTrue($mapped === [['label' => 'memory', 'score' => 9]], 'transformer map returned unchanged input');
+});
+
+check('pyramidal_conversation_context_survives_requests', function () use ($base): void {
+    $storedByAction = ActionScript::run('memory.store_conversation', [
+        'conversation_id' => 'action-thread',
+        'collection' => 'action-conversation',
+        'message' => 'Mi pregunta anterior fue sobre Demian',
+        'response' => 'Demian es una novela de Hermann Hesse.',
+    ]);
+    expectTrue(($storedByAction['result']['stored'] ?? false) === true, 'ActionScript did not store the conversation exchange');
+    $loadedByAction = ActionScript::run('memory.load_conversation', [
+        'conversation_id' => 'action-thread',
+        'collection' => 'action-conversation',
+    ]);
+    expectTrue(($loadedByAction['result']['count'] ?? 0) === 2, 'ActionScript did not load the prior exchange');
+
+    $dataPath = $base . '/conversation/datacore';
+    $pyramidPath = $base . '/conversation/pyramid';
+    $conversationMemory = new TieredMemory($dataPath, $pyramidPath);
+    $conversationMemory->appendConversationExchange(
+        'thread-1',
+        'Estoy leyendo Demian de Hermann Hesse',
+        'Entendido, estás leyendo Demian.',
+        'conversation-test'
+    );
+    $conversationMemory->appendConversationExchange(
+        'thread-1',
+        '¿Quién es el protagonista?',
+        'El protagonista es Emil Sinclair.',
+        'conversation-test'
+    );
+    $conversationMemory->appendConversationExchange(
+        'thread-1',
+        '¿Y quién lo guía?',
+        'Max Demian guía a Sinclair.',
+        'conversation-test'
+    );
+    expectTrue(count($conversationMemory->conversationTurns('thread-1', 'conversation-test')) === 6, 'Hot conversation lost stored turns');
+    expectTrue($conversationMemory->search('Max Demian guía', 'conversation-test') === [], 'conversation state leaked into durable semantic search');
+    $conversationMemory->close();
+
+    $reopened = new TieredMemory($dataPath, $pyramidPath);
+    $turns = $reopened->conversationTurns('thread-1', 'conversation-test');
+    expectTrue(count($turns) === 6, 'complete conversation did not survive a new PHP request');
+    expectTrue(($turns[0]['content'] ?? '') === 'Estoy leyendo Demian de Hermann Hesse', 'first Hot turn was lost');
+    expectTrue(($turns[5]['content'] ?? '') === 'Max Demian guía a Sinclair.', 'latest assistant answer was not retained');
+
+    $context = ActionScript::run('memory.build_context', [
+        'message' => '¿Quién lo guía?',
+        'memories' => [],
+        'conversation' => $turns,
+        'classification' => [],
+    ]);
+    $text = (string)($context['result']['context'] ?? '');
+    expectTrue(str_contains($text, 'Emil Sinclair') && str_contains($text, 'Max Demian'), 'recent dialogue was not added to Qwen context');
+    $reopened->close();
+
+    $longConversation = new TieredMemory($base . '/long-conversation/datacore', $base . '/long-conversation/pyramid');
+    $longConversation->appendConversationExchange('long-thread', str_repeat('A', 1200), str_repeat('B', 1200), 'long-talk', 2000);
+    $longConversation->appendConversationExchange('long-thread', str_repeat('C', 1200), str_repeat('D', 1200), 'long-talk', 2000);
+    $longTurns = $longConversation->conversationTurns('long-thread', 'long-talk');
+    expectTrue(count($longTurns) === 4, 'Warm transition lost conversation turns');
+    expectTrue(($longTurns[0]['_conversation_tier'] ?? '') === 'warm', 'older long-conversation turns did not move to Warm');
+    expectTrue(($longTurns[3]['_conversation_tier'] ?? '') === 'hot', 'latest long-conversation turns did not remain Hot');
+
+    $expiredId = 'conversation_warm_' . substr(hash('sha256', 'expired-thread'), 0, 32);
+    $longConversation->store($expiredId, [
+        'role' => 'conversation',
+        'conversation_id' => 'expired-thread',
+        '_memory_kind' => 'conversation_warm',
+        'turns' => [
+            ['role' => 'user', 'content' => 'expired question', 'at' => microtime(true) - 8 * 86400],
+            ['role' => 'assistant', 'content' => 'expired answer', 'at' => microtime(true) - 8 * 86400],
+        ],
+    ], 'warm', 'long-talk');
+    expectTrue($longConversation->conversationTurns('expired-thread', 'long-talk') === [], 'conversation Warm turns remained after seven days');
+    $longConversation->close();
 });
 
 $memory->close();

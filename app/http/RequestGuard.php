@@ -54,6 +54,16 @@ final class RequestGuard
         }
     }
 
+    public static function conversationId(): string
+    {
+        self::startSession();
+        if (!is_string($_SESSION['jah_conversation_id'] ?? null)
+            || preg_match('/^[a-zA-Z0-9_.-]{1,128}$/', $_SESSION['jah_conversation_id']) !== 1) {
+            $_SESSION['jah_conversation_id'] = 'web-' . bin2hex(random_bytes(16));
+        }
+        return $_SESSION['jah_conversation_id'];
+    }
+
     public static function browserIsAuthorized(): bool
     {
         self::startSession();

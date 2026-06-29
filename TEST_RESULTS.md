@@ -17,6 +17,9 @@ find app public src php_actionscript_php_doc tests -name '*.php' -print0 | xargs
 - checksummed JAS bytecode execution and corruption rejection;
 - ActionScript actions, promises, streams, events, types, policy and task execution;
 - generated-summary classification, persistence and retrieval;
+- Hot conversation surviving a new PHP request, long-dialogue overflow to seven-day Warm, and bounded Qwen context;
+- Warm expiration without automatic promotion and permanent Cold retention;
+- explicit/high-importance knowledge routed to Cold and lower-importance reusable context routed to Warm;
 - collection isolation, tier deduplication, migration and forgetting;
 - DataCore pointer/index correctness, rebuilding and metrics;
 - access-key, CSRF and sensitive-field protections;
@@ -31,6 +34,6 @@ Run on 2026-06-28:
 ```text
 JAS compiler and bytecode: 7/7 PASS
 ActionScript runtime: 7/7 PASS
-MemoryAgent product: 17/17 PASS
+MemoryAgent product: 19/19 PASS
 PHP lint: PASS for every PHP file under app, public, src, php_actionscript_php_doc and tests
 ```

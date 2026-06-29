@@ -34,8 +34,12 @@ return [
     ],
     'tiered_memory_config' => [
         'hot' => ['ttl' => 3600, 'max_files' => 1000],
-        'warm' => ['ttl' => 86400, 'max_files' => 5000],
-        'cold' => ['ttl' => 604800, 'max_files' => 50000],
+        'warm' => ['ttl' => 604800, 'max_files' => 5000],
+        'cold' => ['ttl' => 0, 'max_files' => 50000],
+    ],
+    'memory' => [
+        'hot_conversation_chars' => 8000,
+        'context_max_chars' => 12000,
     ],
     'log' => [
         'enabled' => (bool) jah_env('JAH_LOG_ENABLED', true),
@@ -50,5 +54,3 @@ return [
         'trusted_proxies' => array_filter(array_map('trim', explode(',', (string) jah_env('JAH_TRUSTED_PROXIES', '')))),
     ],
 ];
-
-

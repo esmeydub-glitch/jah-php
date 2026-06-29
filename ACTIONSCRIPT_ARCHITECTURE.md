@@ -42,14 +42,16 @@ salk.preflight
   ↓ security gate
 memory.classify_input
   ↓ memory value decision
-memory.search_context
-  ↓ DataCore v3 indexed retrieval + metrics
+memory.load_conversation + memory.search_context
+  ↓ recent dialogue + DataCore v3 indexed knowledge
 memory.build_context
   ↓ bounded Qwen context
 qwen.ask
   ↓ native PHP cURL
+memory.store_conversation
+  ↓ active dialogue in Hot; long overflow in Warm
 memory.store_interaction
-  ↓ meaningful non-secret memory only
+  ↓ explicit or classified important knowledge in Cold
 salk.audit_event
 ```
 
@@ -60,13 +62,15 @@ The pipeline stops before Qwen when security preflight fails. It also stops befo
 | Action | Responsibility |
 |---|---|
 | `memory.classify_input` | Decide whether to store user input or reusable generated knowledge |
+| `memory.load_conversation` | Merge ordered Hot and Warm turns by conversation ID without semantic matching |
 | `memory.search_context` | Ranked DataCore inverted-index retrieval |
-| `memory.build_context` | Limit and mask recalled context |
-| `memory.store_interaction` | Persist user facts or deduplicated Qwen summaries with their source query |
+| `memory.build_context` | Combine and bound recent dialogue plus durable recalled knowledge |
+| `memory.store_conversation` | Append an exchange to Hot and move older sections to seven-day Warm when dialogue becomes long |
+| `memory.store_interaction` | Route explicit/high-importance facts to permanent Cold; summaries and lower-importance reusable context to seven-day Warm |
 | `memory.save` | Explicit collection-aware memory write |
 | `memory.retrieve` | Direct pointer lookup by ID |
 | `memory.forget` | Append a durable tombstone |
-| `memory.migrate` | Move Hot → Warm → Cold |
+| `memory.migrate` | Move generic aged Hot records to Warm and expire Warm after seven days; never expire or auto-create Cold |
 | `memory.stats` | Return memory and index statistics |
 | `memory.reindex` | Rebuild and compact DataCore v3 indexes |
 
@@ -92,4 +96,4 @@ php php_actionscript_php_doc/tests/run.php
 php tests/run.php
 ```
 
-The first suite validates the generic ActionScript runtime. The product suite validates its integration with DataCore, SALK, collections, migration, forgetting, metrics, and reindexing.
+The first suite validates the generic ActionScript runtime. The product suite validates its integration with DataCore, SALK, cross-request conversation context, collections, migration, forgetting, metrics, and reindexing.

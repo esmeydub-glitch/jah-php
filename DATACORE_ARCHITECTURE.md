@@ -2,6 +2,8 @@
 
 DataCore v3 is JAH MemoryAgent's pure-PHP persistent memory engine. It is not a wrapper around SQL, a vector database, or an external package. Its design is optimized for the MemoryAgent workload: one durable write after selected conversations, followed by memory retrieval on every agent turn.
 
+Dialogue uses two deterministic documents per collection and conversation ID. `conversation_state` holds the active Hot section. When that section exceeds the working character budget, complete oldest exchanges move to `conversation_warm`. Warm turns remain available for seven days and then expire; they never become Cold automatically. Reads merge unexpired Warm history and Hot dialogue chronologically, so retrieval does not depend on the wording of the next question. Explicit “recuerda/guarda” instructions and high-importance classifications are stored directly in permanent Cold, which has no time expiration. Only the Qwen prompt is size-bounded.
+
 ## Storage model
 
 Each canonical record is append-only:

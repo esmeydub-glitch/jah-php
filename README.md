@@ -17,6 +17,7 @@ The Track 1 requirements are implemented directly:
 | MemoryAgent requirement | JAH implementation |
 |---|---|
 | Persistent cross-session memory | Append-only `DataCoreTurbo` storage and persistent JAH indexes |
+| Immediate conversational context | Hot keeps active dialogue; older sections of long conversations remain in Warm for seven days |
 | Accumulated experience | Every meaningful interaction is classified and may become a durable memory |
 | User preference memory | Preference, workflow, identity, and project signals receive explicit classifications |
 | Efficient retrieval | SHA-256 direct pointers, persistent inverted term/prefix index, ranked candidates, deduplication, and bounded results |
@@ -28,6 +29,7 @@ The Track 1 requirements are implemented directly:
 
 - Pure PHP ActionScript registry with required parameters, execution budgets, result envelopes, and traces.
 - Persistent Hot / Warm / Cold memory lifecycle.
+- Human conversational memory: Hot keeps the active thread, Warm keeps temporary history for seven days, and Cold stores permanent explicitly requested or highly important knowledge.
 - Collection isolation for independent users, agents, or workspaces.
 - Meaningful-memory classifier that rejects greetings, noise, transient questions, secrets, and forget commands.
 - Reusable-knowledge classifier that persists Qwen-generated book summaries and their source query instead of saving only the prompt; repeated requests update one deterministic memory instead of creating duplicates.
@@ -58,11 +60,12 @@ Technical deep dives:
 ┌──────────────────── ActionScript PHP runtime ─────────────────────┐
 │ 1. salk.preflight                                                │
 │ 2. memory.classify_input                                         │
-│ 3. memory.search_context                                         │
-│ 4. memory.build_context                                          │
+│ 3. memory.load_conversation + memory.search_context              │
+│ 4. memory.build_context (recent turns + durable knowledge)       │
 │ 5. qwen.ask                                                      │
-│ 6. memory.store_interaction (user fact or generated knowledge)  │
-│ 7. salk.audit_event                                              │
+│ 6. memory.store_conversation (Hot + long-dialogue Warm)          │
+│ 7. memory.store_interaction (important knowledge → Cold)         │
+│ 8. salk.audit_event                                              │
 └───────────────┬───────────────────────────────┬───────────────────┘
                 │                               │
                 ▼                               ▼
@@ -76,9 +79,9 @@ Technical deep dives:
 │  └─ persistent tombstones    │                  │
 │                              │                  ▼
 │ MemoryPyramid                │   ┌───────────────────────────────┐
-│  ├─ Hot: request cache       │   │ Qwen Cloud                   │
-│  ├─ Warm: JAH line journals  │   │ qwen-max / configured model  │
-│  └─ Cold: gzip JAH records   │   └───────────────────────────────┘
+│  ├─ Hot: active dialogue     │   │ Qwen Cloud                   │
+│  ├─ Warm: temporary, 7 days  │   │ qwen-max / configured model  │
+│  └─ Cold: permanent memory   │   └───────────────────────────────┘
 └───────────────┬──────────────┘
                 ▼
 ┌──────────────────────────────────────────────────────────────────┐
@@ -94,9 +97,9 @@ Request
   ↓
 SALK security preflight ── fail ──→ block, mask, and audit
   ↓ pass
-Classify the input
+Load Hot/Warm conversation + classify durable importance
   ↓
-Retrieve relevant memories from the selected collection
+Retrieve relevant Warm/Cold memories from the selected collection
   ↓
 Deduplicate → remove tombstoned records → sort by recency → limit
   ↓
@@ -104,7 +107,7 @@ Build a compact memory context
   ↓
 Ask Qwen Cloud
   ↓
-Store only meaningful, non-secret user knowledge
+Append dialogue to Hot; retain long overflow in Warm for 7 days; store permanent knowledge in Cold
   ↓
 Return a masked ActionScript trace and persist the audit event
 ```
@@ -113,10 +116,15 @@ Return a masked ActionScript trace and persist the audit event
 
 ```text
 HOT                         WARM                        COLD
-fresh / frequently used     older than 1 hour          older than 24 hours
-request cache + canonical   JAH serialized journal     gzip-compressed JAH
-          │                         │                         │
-          └──── migrate ───────────►└──── migrate ───────────►
+active conversation         temporary history          permanent important knowledge
+natural working context     retained for 7 days        "recuerda" / "guarda" / high importance
+          │                         │                         ▲
+          └─ conversation grows ───►│                         │
+classified important interaction ─────────────────────────────┘
+
+Hot and unexpired Warm turns are loaded together to preserve conversational
+coherence. Warm expires after seven days and never becomes Cold automatically.
+Cold has no time expiration. The Qwen prompt is size-bounded independently.
 
 DELETE / FORGET
         ↓
@@ -244,7 +252,20 @@ curl -X POST \
   -H "X-JAH-API-Key: $JAH_API_KEY" \
   -d "action=chat" \
   -d "collection=demo-user" \
+  -d "conversation_id=demo-thread" \
   -d "message=How should you answer me?" \
+  "http://localhost:8000/api.php"
+```
+
+Send a follow-up with the same `conversation_id`; JAH loads recent Hot turns even when the new words do not overlap the previous question:
+
+```bash
+curl -X POST \
+  -H "X-JAH-API-Key: $JAH_API_KEY" \
+  -d "action=chat" \
+  -d "collection=demo-user" \
+  -d "conversation_id=demo-thread" \
+  -d "message=And who wrote it?" \
   "http://localhost:8000/api.php"
 ```
 
@@ -292,7 +313,7 @@ php tests/run.php
 Expected result:
 
 ```text
-SUMMARY 17/17
+SUMMARY 19/19
 ```
 
 Run the ActionScript PHP suite:
@@ -307,7 +328,7 @@ Expected result:
 SUMMARY 7/7
 ```
 
-The product tests cover API access keys, CSRF, generated book-summary memory, tier deduplication, collection isolation, archived deletion, tier migration, sensitive-field rejection, generated batch IDs, delimiter-safe pointers, automatic index rebuilding, stale-posting suppression, search metrics, and the `memory.reindex` ActionScript action. The storage layer was also verified with 12 concurrent writers targeting one segment, with 12/12 records searchable and retrievable.
+The product tests cover API access keys, CSRF, generated book-summary memory, Hot conversational continuity, Hot→Warm overflow, seven-day Warm expiration, permanent Cold memory, bounded Qwen context, collection isolation, forgetting, sensitive-field rejection, indexes, search metrics, replication and worker correctness.
 
 ## DataCore performance
 
