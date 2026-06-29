@@ -25,12 +25,12 @@ final class EventAgent
             'prev_hash' => $this->lastHash,
         ];
 
-        $event['hash'] = hash('sha256', json_encode($event));
+        $event['hash'] = hash('sha256', PhpSerializer::encode($event));
         $this->lastHash = $event['hash'];
 
         file_put_contents(
             $this->basePath . "/{$collection}.events",
-            json_encode($event) . "\n",
+            PhpSerializer::encode($event) . "\n",
             FILE_APPEND
         );
     }

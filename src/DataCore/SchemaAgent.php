@@ -23,9 +23,9 @@ final class SchemaAgent
 
     private function ensureCollection(string $name): void
     {
-        $schemaFile = $this->basePath . "/{$name}.json";
+        $schemaFile = $this->basePath . "/{$name}.jahp";
         if (!file_exists($schemaFile)) {
-            file_put_contents($schemaFile, json_encode([
+            file_put_contents($schemaFile, PhpSerializer::encode([
                 'name' => $name,
                 'fields' => [],
                 'created_at' => time(),
@@ -35,9 +35,9 @@ final class SchemaAgent
 
     public function addField(string $field, string $type): self
     {
-        $schema = json_decode(file_get_contents($this->basePath . "/{$this->collection}.json"), true) ?: [];
+        $schema = PhpSerializer::decode(file_get_contents($this->basePath . "/{$this->collection}.jahp"), true) ?: [];
         $schema['fields'][$field] = $type;
-        file_put_contents($this->basePath . "/{$this->collection}.json", json_encode($schema));
+        file_put_contents($this->basePath . "/{$this->collection}.jahp", PhpSerializer::encode($schema));
         return $this;
     }
 }

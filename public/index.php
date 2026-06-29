@@ -71,6 +71,11 @@ switch ($action) {
         $statsData = $result['result'] ?? [];
         break;
 
+    case 'salk_status':
+        $result = $runtime->runSalkPreflight('index.salk_status');
+        $salkResult = $result['result'] ?? [];
+        break;
+
     case 'chat':
     default:
         $action = 'chat';
@@ -147,6 +152,7 @@ function brief(mixed $value, int $length = 220): string {
         <a href="?action=save" class="<?= $action === 'save' ? 'active' : '' ?>">Guardar / Save</a>
         <a href="?action=search" class="<?= $action === 'search' ? 'active' : '' ?>">Buscar / Search</a>
         <a href="?action=stats" class="<?= $action === 'stats' ? 'active' : '' ?>">Estadísticas / Stats</a>
+        <a href="?action=salk_status" class="<?= $action === 'salk_status' ? 'active' : '' ?>">SALK</a>
         <a href="?action=migrate">Migrar tiers / Migrate</a>
     </div>
 
@@ -221,14 +227,23 @@ function brief(mixed $value, int $length = 220): string {
         <button type="submit">Buscar / Search</button>
     </form>
 
+    <?php if ($query !== ''): ?>
+    <h2>Resultado de búsqueda / Search result</h2>
+    <div class="item <?= $searchResults !== [] ? 'hot' : '' ?>">
+        <strong>SEARCH <?= $searchResults !== [] ? 'PASS' : 'PASS - sin coincidencias' ?></strong><br>
+        Query: <?= e($query) ?><br>
+        Total: <?= count($searchResults) ?>
+    </div>
+    <?php endif; ?>
+
     <?php if ($searchResults !== []): ?>
-    <h2>Resultados / Results (<?= count($searchResults) ?>)</h2>
+    <h2>Memorias encontradas / Found memories</h2>
     <?php foreach ($searchResults as $item): $tierClass = $item['_memory_tier'] ?? $item['_tier'] ?? 'hot'; ?>
     <div class="item <?= e($tierClass) ?>">
         <strong>ID:</strong> <?= e($item['id'] ?? 'N/A') ?>
         | <strong>Rol:</strong> <?= e($item['role'] ?? 'memory') ?>
         | <strong>Tier:</strong> <?= e($tierClass) ?><br>
-        <?= e(brief($item['content'] ?? $item)) ?>
+        <strong>Contenido:</strong> <?= e(brief($item['content'] ?? $item)) ?>
         <div class="meta">
             <?= e(date('Y-m-d H:i', (int)($item['_ts'] ?? time()))) ?>
             <?php if (isset($item['id'])): ?>
@@ -238,12 +253,35 @@ function brief(mixed $value, int $length = 220): string {
     </div>
     <?php endforeach; ?>
     <?php elseif ($query !== ''): ?>
-    <p class="info">No se encontraron resultados / No results found</p>
+    <p class="info">La búsqueda corrió correctamente, pero no hubo coincidencias para esa palabra.</p>
     <?php endif; ?>
+
+    <?php elseif ($action === 'salk_status'): ?>
+    <h2>SALK Status</h2>
+    <div class="item <?= ($salkResult['ok'] ?? false) ? 'hot' : 'cold' ?>">
+        <strong><?= ($salkResult['ok'] ?? false) ? 'SALK PASS' : 'SALK REVIEW' ?></strong><br>
+        Contexto: <?= e($salkResult['context'] ?? 'index.salk_status') ?><br>
+        Errores: <?= count($salkResult['errors'] ?? []) ?><br>
+        Warnings: <?= count($salkResult['warnings'] ?? []) ?>
+    </div>
+    <h2>Checks</h2>
+    <pre><?= e(php_dump($salkResult)) ?></pre>
 
     <?php else: ?>
     <h2>Estadísticas / Statistics</h2>
-    <div class="item"><pre><?= e(php_dump($statsData ?? [])) ?></pre></div>
+    <?php $stats = is_array($statsData ?? null) ? $statsData : []; ?>
+    <div class="item hot">
+        <strong>STATS PASS</strong><br>
+        Estadísticas recuperadas correctamente.
+    </div>
+    <div class="runtime">
+        <div class="chip">Hot entries: <?= e($stats['hot_entries'] ?? 0) ?></div>
+        <div class="chip">Hot docs: <?= e($stats['hot_documents'] ?? 0) ?></div>
+        <div class="chip">Warm files: <?= e($stats['warm_files'] ?? 0) ?></div>
+        <div class="chip">Warm records: <?= e($stats['warm_records'] ?? 0) ?></div>
+        <div class="chip">Cold files: <?= e($stats['cold_files'] ?? 0) ?></div>
+    </div>
+    <pre><?= e(php_dump($stats)) ?></pre>
     <?php endif; ?>
 </body>
 </html>

@@ -17,15 +17,15 @@ final class IntegrityAgent
     {
         $issues = [];
         $dataDir = dirname($this->basePath) . '/data';
-        $files = glob("{$dataDir}/{$collection}_*.ndjson");
+        $files = glob("{$dataDir}/{$collection}_*.jahl");
 
         foreach ($files as $file) {
             $lines = file($file);
             $lineNum = 0;
             foreach ($lines as $line) {
-                $record = json_decode($line, true);
+                $record = PhpSerializer::decode($line, true);
                 if ($record) {
-                    $expected = hash('sha256', json_encode($record['payload']));
+                    $expected = hash('sha256', PhpSerializer::encode($record['payload']));
                     if (!isset($record['hash']) || $record['hash'] !== $expected) {
                         $issues[] = "{$file}:{$lineNum}";
                     }
@@ -42,7 +42,7 @@ final class IntegrityAgent
         // Marca punto de integridad
         file_put_contents(
             $this->basePath . '/.checkpoint',
-            json_encode(['ts' => time(), 'hash' => bin2hex(random_bytes(8))])
+            PhpSerializer::encode(['ts' => time(), 'hash' => bin2hex(random_bytes(8))])
         );
     }
 }

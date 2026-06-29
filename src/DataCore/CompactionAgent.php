@@ -19,9 +19,9 @@ final class CompactionAgent
         $cacheDir = $this->basePath . '/cache';
 
         $documents = [];
-        foreach (glob("{$dataDir}/{$collection}_*.ndjson") as $file) {
+        foreach (glob("{$dataDir}/{$collection}_*.jahl") as $file) {
             foreach (file($file) as $line) {
-                $record = json_decode($line, true);
+                $record = PhpSerializer::decode($line, true);
                 if ($record && isset($record['payload'])) {
                     $id = $record['payload']['id'] ?? null;
                     if ($id && !isset($record['payload']['_deleted'])) {
@@ -33,10 +33,10 @@ final class CompactionAgent
         }
 
         // Escribir compactado
-        $compacted = "{$dataDir}/{$collection}_compact.ndjson";
+        $compacted = "{$dataDir}/{$collection}_compact.jahl";
         $fd = fopen($compacted, 'w');
         foreach ($documents as $doc) {
-            fwrite($fd, json_encode($doc) . "\n");
+            fwrite($fd, PhpSerializer::encode($doc) . "\n");
         }
         fclose($fd);
 
@@ -54,6 +54,6 @@ final class CompactionAgent
         foreach ($docs as $id => $doc) {
             $idx[$id] = $line++;
         }
-        file_put_contents($indexFile, json_encode($idx));
+        file_put_contents($indexFile, PhpSerializer::encode($idx));
     }
 }

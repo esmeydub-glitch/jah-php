@@ -8,7 +8,7 @@ namespace Jah\DataCore;
  * MemoryPyramid
  * Pure PHP Hot / Warm / Cold memory lifecycle for JAH MemoryAgent.
  * - Hot: in-request LRU cache
- * - Warm: persistent NDJSON with file+offset index
+ * - Warm: persistent JAH serialized lines with file+offset index
  * - Cold: compressed historical files
  */
 final class MemoryPyramid
@@ -69,8 +69,8 @@ final class MemoryPyramid
     {
         return [
             'hot_entries' => count($this->hotCache->getAll()),
-            'warm_files' => count(glob($this->warmCache->getPath() . '/*.ndjson') ?: []),
-            'cold_files' => count(glob($this->coldStorage->getPath() . '/*.json.gz') ?: []),
+            'warm_files' => count(glob($this->warmCache->getPath() . '/*.jahl') ?: []),
+            'cold_files' => count(glob($this->coldStorage->getPath() . '/*.jahp.gz') ?: []),
         ];
     }
 }
@@ -108,15 +108,15 @@ class WarmMemory
         $line = fgets($handle);
         fclose($handle);
 
-        $record = $line !== false ? json_decode($line, true) : null;
+        $record = $line !== false ? PhpSerializer::decode($line, true) : null;
         return is_array($record) ? ($record['payload'] ?? null) : null;
     }
 
     public function set(string $key, mixed $value): void
     {
-        $file = $this->path . '/warm_' . date('Ymd') . '.ndjson';
+        $file = $this->path . '/warm_' . date('Ymd') . '.jahl';
         $offset = is_file($file) ? (int)filesize($file) : 0;
-        $record = json_encode(['key' => $key, 'payload' => $value], JSON_UNESCAPED_UNICODE);
+        $record = PhpSerializer::encode(['key' => $key, 'payload' => $value]);
         if ($record === false) {
             return;
         }
@@ -148,7 +148,7 @@ class WarmMemory
                 $this->index[$key] = [$file, $offset];
             } elseif (count($parts) === 2) {
                 // Backward compatibility with old index format.
-                $this->index[$parts[0]] = [$this->path . '/warm_' . date('Ymd') . '.ndjson', (int)$parts[1]];
+                $this->index[$parts[0]] = [$this->path . '/warm_' . date('Ymd') . '.jahl', (int)$parts[1]];
             }
         }
 
@@ -176,7 +176,7 @@ class ColdMemory
 
     public function get(string $key): mixed
     {
-        foreach (glob($this->path . '/*.json.gz') ?: [] as $file) {
+        foreach (glob($this->path . '/*.jahp.gz') ?: [] as $file) {
             $tmp = tempnam(sys_get_temp_dir(), 'jah_cold_');
             if ($tmp === false) {
                 continue;
@@ -186,7 +186,7 @@ class ColdMemory
             $raw = $ok ? file_get_contents($tmp) : false;
             @unlink($tmp);
 
-            $data = $raw !== false ? json_decode($raw, true) : null;
+            $data = $raw !== false ? PhpSerializer::decode($raw, true) : null;
             if (is_array($data) && array_key_exists($key, $data)) {
                 return $data[$key];
             }
@@ -217,10 +217,10 @@ class ColdMemory
             $data[(string)$item['key']] = $item['value'];
         }
 
-        $json = json_encode($data, JSON_UNESCAPED_UNICODE);
-        if ($json !== false) {
-            $file = $this->path . '/cold_' . time() . '_' . bin2hex(random_bytes(3)) . '.json.gz';
-            file_put_contents($file, Compressor::compress($json, 'gzip'), LOCK_EX);
+        $payload = PhpSerializer::encode($data);
+        if ($payload !== '') {
+            $file = $this->path . '/cold_' . time() . '_' . bin2hex(random_bytes(3)) . '.jahp.gz';
+            file_put_contents($file, Compressor::compress($payload, 'gzip'), LOCK_EX);
         }
 
         $this->queue = array_values(array_filter(

@@ -2,8 +2,6 @@
 
 declare(strict_types=1);
 
-use Jah\Http\JsonTransport;
-
 class QwenConnector
 {
     private string $apiKey;
@@ -40,10 +38,13 @@ class QwenConnector
             ],
         ];
 
-        try {
-            $jsonPayload = JsonTransport::encodeQwenPayload($data);
-        } catch (Throwable $e) {
-            return 'Error: no se pudo preparar la petición segura para Qwen: ' . $e->getMessage();
+        if ($this->containsForbiddenPayloadKeys($data)) {
+            return 'Error: payload Qwen bloqueado por SALK: no se permiten secretos en el cuerpo.';
+        }
+
+        $jsonPayload = json_encode($data, JSON_UNESCAPED_UNICODE);
+        if ($jsonPayload === false) {
+            return 'Error: no se pudo preparar la petición para Qwen.';
         }
 
         $ch = curl_init($this->baseUrl . '/chat/completions');
@@ -79,11 +80,36 @@ class QwenConnector
         return $this->parseResponse($response);
     }
 
+    private function containsForbiddenPayloadKeys(array $payload): bool
+    {
+        foreach ($payload as $key => $value) {
+            $key = strtolower((string)$key);
+
+            if (
+                str_contains($key, 'api_key') ||
+                str_contains($key, 'apikey') ||
+                str_contains($key, 'authorization') ||
+                str_contains($key, 'bearer') ||
+                str_contains($key, 'token') ||
+                str_contains($key, 'secret') ||
+                str_contains($key, 'password')
+            ) {
+                return true;
+            }
+
+            if (is_array($value) && $this->containsForbiddenPayloadKeys($value)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function parseResponse(string $response): string
     {
-        $result = JsonTransport::decodeQwenResponse($response);
-        if ($result === []) {
-            return 'Respuesta no JSON de Qwen: ' . substr($response, 0, 300);
+        $result = json_decode($response, true);
+        if (!is_array($result)) {
+            return 'Respuesta no interpretable de Qwen: ' . substr($response, 0, 300);
         }
 
         if (isset($result['choices'][0]['message']['content'])) {

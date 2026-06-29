@@ -6,9 +6,9 @@ $boot = require dirname(__DIR__) . '/app/bootstrap.php';
 $config = $boot['config'];
 
 use Jah\Memory\TieredMemory;
-use Jah\Http\JsonTransport;
+use Jah\Http\JahTransport;
 
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: text/plain; charset=utf-8');
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     http_response_code(204);
@@ -22,7 +22,7 @@ require_once dirname(__DIR__) . '/app/actions/MemoryActionScript.php';
 $runtime = new MemoryActionScript($tiered, $config);
 
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-$input = JsonTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
+$input = JahTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
 
 $action = (string)($input['action'] ?? ($method === 'GET' ? 'status' : 'chat'));
 $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($input['collection'] ?? 'memories')) ?: 'memories';
@@ -43,17 +43,37 @@ try {
 
         case 'salk_status':
             $salkStatus = $runtime->runSalkPreflight('api.salk_status');
-            $output = ['status' => 'success', 'salk' => $salkStatus['result'] ?? []];
+            $salk = $salkStatus['result'] ?? [];
+            $ok = (bool)($salk['ok'] ?? false);
+            $output = [
+                'status' => $ok ? 'success' : 'warning',
+                'pass' => $ok,
+                'message' => $ok ? 'SALK PASS: security checks completed without errors' : 'SALK REVIEW: security checks returned errors',
+                'salk' => $salk,
+            ];
             break;
 
         case 'salk_package_vectors':
             $vectors = $runtime->runSalkPackageVectorScan();
-            $output = ['status' => 'success', 'package_vectors' => $vectors['result'] ?? []];
+            $scan = $vectors['result'] ?? [];
+            $ok = (bool)($scan['ok'] ?? false);
+            $output = [
+                'status' => $ok ? 'success' : 'warning',
+                'pass' => $ok,
+                'message' => $ok ? 'PACKAGE VECTOR PASS: no Node/npm artifacts detected' : 'PACKAGE VECTOR REVIEW: artifacts detected',
+                'package_vectors' => $scan,
+            ];
             break;
 
         case 'stats':
             $stats = $runtime->stats();
-            $output = ['status' => 'success', 'data' => $stats['result'] ?? []];
+            $data = $stats['result'] ?? [];
+            $output = [
+                'status' => 'success',
+                'pass' => true,
+                'message' => 'STATS PASS: statistics returned',
+                'data' => $data,
+            ];
             break;
 
         case 'save':
@@ -82,7 +102,16 @@ try {
             if ($query === '') throw new RuntimeException('query required');
             $limit = max(1, min((int)($input['limit'] ?? 20), 100));
             $found = $runtime->search($query, $collection, $limit);
-            $output = ['status' => 'success', 'data' => $found['result']['memories'] ?? [], 'total' => $found['result']['count'] ?? 0];
+            $memories = $found['result']['memories'] ?? [];
+            $total = (int)($found['result']['count'] ?? count($memories));
+            $output = [
+                'status' => 'success',
+                'pass' => true,
+                'message' => 'SEARCH PASS: search executed',
+                'query' => $query,
+                'total' => $total,
+                'data' => $memories,
+            ];
             break;
 
         case 'delete':
@@ -127,4 +156,4 @@ try {
 }
 
 $tiered->close();
-JsonTransport::respond($output, $runtime->getSalkGuard(), 'api.response');
+JahTransport::respond($output, $runtime->getSalkGuard());

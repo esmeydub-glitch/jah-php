@@ -16,22 +16,13 @@ return [
     'timezone' => (string) jah_env('JAH_TIMEZONE', 'UTC'),
     'debug' => (bool) jah_env('JAH_DEBUG', false),
     'agents' => [
-        'max_workers' => jah_int_env('JAH_MAX_WORKERS', 4),
-        'worker_timeout' => jah_int_env('JAH_WORKER_TIMEOUT', 30),
-        'boot_on_start' => [
-            'GatewayAgent',
-            'MemoryAgent',
-            'ObserverAgent',
-            'PredictorAgent',
-            'OrchestratorAgent',
-            'NetworkAgent',
-            'WorkerAgent',
-            'CacheAgent',
-            'ExecutorAgent',
-            'AnalystAgent',
-            'OptimizerAgent',
-            'CleanerAgent',
-        ],
+        /*
+         * Hackathon clean mode:
+         * the active runtime is app/actions/MemoryActionScript.php.
+         * Legacy coordination agents were removed to avoid confusion.
+         */
+        'active_runtime' => 'MemoryActionScript',
+        'boot_on_start' => [],
     ],
     'paths' => [
         'root' => dirname(__DIR__, 2),

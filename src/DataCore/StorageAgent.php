@@ -29,7 +29,7 @@ final class StorageAgent
         $segment = $this->getSegment($collection, $id);
         $lineOffset = $this->getLineOffset($collection, $segment);
 
-        $record = json_encode([
+        $record = PhpSerializer::encode([
             'id' => $id,
             'collection' => $collection,
             'payload' => $doc,
@@ -37,7 +37,7 @@ final class StorageAgent
         ]) . "\n";
 
         $bytes = file_put_contents(
-            $this->basePath . "/{$collection}_{$segment}.ndjson",
+            $this->basePath . "/{$collection}_{$segment}.jahl",
             $record,
             FILE_APPEND
         );
@@ -56,14 +56,14 @@ final class StorageAgent
         }
 
         [$segment, $line] = $idx[$id];
-        $file = $this->basePath . "/{$collection}_{$segment}.ndjson";
+        $file = $this->basePath . "/{$collection}_{$segment}.jahl";
 
         if (!file_exists($file)) {
             return null;
         }
 
         $lines = file($file);
-        $record = json_decode($lines[$line] ?? '{}', true);
+        $record = PhpSerializer::decode($lines[$line] ?? '{}', true);
 
         $payload = $record['payload'] ?? null;
         if (!is_array($payload) || ($payload['_deleted'] ?? false) === true) {
@@ -76,9 +76,9 @@ final class StorageAgent
     public function query(string $collection, callable $filter): array
     {
         $latest = [];
-        foreach (glob($this->basePath . "/{$collection}_*.ndjson") as $file) {
+        foreach (glob($this->basePath . "/{$collection}_*.jahl") as $file) {
             foreach (file($file) as $line) {
-                $record = json_decode($line, true);
+                $record = PhpSerializer::decode($line, true);
                 if (is_array($record) && isset($record['id'], $record['payload']) && is_array($record['payload'])) {
                     $latest[(string) $record['id']] = $record['payload'];
                 }
@@ -124,7 +124,7 @@ final class StorageAgent
 
     private function getLineOffset(string $collection, int $segment): int
     {
-        $file = $this->basePath . "/{$collection}_{$segment}.ndjson";
+        $file = $this->basePath . "/{$collection}_{$segment}.jahl";
         return file_exists($file) ? count(file($file)) : 0;
     }
 
@@ -157,8 +157,8 @@ final class StorageAgent
     public function getStats(): array
     {
         $stats = [];
-        foreach (glob($this->basePath . "/*.ndjson") as $file) {
-            $basename = basename($file, '.ndjson');
+        foreach (glob($this->basePath . "/*.jahl") as $file) {
+            $basename = basename($file, '.jahl');
             $collection = explode('_', $basename)[0];
             $stats[$collection] = ($stats[$collection] ?? 0) + count(file($file));
         }

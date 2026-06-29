@@ -19,15 +19,15 @@ final class IndexAgent
         $entries = [];
         $dataDir = dirname($this->basePath) . '/data';
 
-        foreach (glob("{$dataDir}/{$collection}_*.ndjson") as $file) {
+        foreach (glob("{$dataDir}/{$collection}_*.jahl") as $file) {
             foreach (file($file) as $line) {
-                $record = json_decode($line, true);
+                $record = PhpSerializer::decode($line, true);
                 if ($record && isset($record['payload'][$field])) {
                     $entries[$record['id']] = $record['payload'][$field];
                 }
             }
         }
 
-        file_put_contents($indexFile, json_encode($entries));
+        file_put_contents($indexFile, PhpSerializer::encode($entries));
     }
 }

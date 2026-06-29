@@ -45,7 +45,7 @@ final class DataCoreLightning
             $this->buckets[$collection] = ['data' => [], 'index' => []];
         }
 
-        $this->buckets[$collection]['data'][] = json_encode(['id' => $id, 'payload' => $doc]);
+        $this->buckets[$collection]['data'][] = PhpSerializer::encode(['id' => $id, 'payload' => $doc]);
         $this->buckets[$collection]['index'][] = "{$id}\n";
 
         // Flush when reach batch
@@ -69,7 +69,7 @@ final class DataCoreLightning
             return;
         }
 
-        $file = "{$this->basePath}/data/{$collection}.ndjson";
+        $file = "{$this->basePath}/data/{$collection}.jahl";
         file_put_contents($file, implode("\n", $this->buckets[$collection]['data']) . "\n", FILE_APPEND);
 
         $indexFile = "{$this->basePath}/index/{$collection}.idx";
@@ -82,14 +82,14 @@ final class DataCoreLightning
     {
         $this->flushBucket($collection);
 
-        $file = "{$this->basePath}/data/{$collection}.ndjson";
+        $file = "{$this->basePath}/data/{$collection}.jahl";
         if (!is_file($file)) {
             return [];
         }
 
         $latest = [];
         foreach (file($file) as $line) {
-            $record = json_decode($line, true);
+            $record = PhpSerializer::decode($line, true);
             if (is_array($record) && isset($record['id'], $record['payload']) && is_array($record['payload'])) {
                 $latest[(string) $record['id']] = $record['payload'];
             }
@@ -104,9 +104,9 @@ final class DataCoreLightning
     public function getStats(): array
     {
         $stats = [];
-        foreach (glob("{$this->basePath}/data/*.ndjson") as $file) {
+        foreach (glob("{$this->basePath}/data/*.jahl") as $file) {
             $lines = count(file($file));
-            $collection = basename($file, '.ndjson');
+            $collection = basename($file, '.jahl');
             $stats[$collection] = $lines;
         }
         return $stats;

@@ -21,7 +21,7 @@ final class TransactionAgent
     public function begin(string $txId): void
     {
         $journal = $this->basePath . "/pending/{$txId}.journal";
-        file_put_contents($journal, json_encode(['status' => 'started', 'ts' => time()]));
+        file_put_contents($journal, PhpSerializer::encode(['status' => 'started', 'ts' => time()]));
     }
 
     public function commit(string $txId): bool

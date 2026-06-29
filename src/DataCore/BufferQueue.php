@@ -42,7 +42,7 @@ final class BufferQueue
         $doc['id'] ??= $id;
         $doc['_ts'] = time();
 
-        $record = json_encode(['id' => $id, 'payload' => $doc]) . "\n";
+        $record = PhpSerializer::encode(['id' => $id, 'payload' => $doc]) . "\n";
         $bytes = strlen($record);
 
         $this->writes[] = $record;
@@ -64,7 +64,7 @@ final class BufferQueue
             return;
         }
 
-        $file = "{$this->dataDir}/{$this->collection}_{$this->segment}.ndjson";
+        $file = "{$this->dataDir}/{$this->collection}_{$this->segment}.jahl";
         file_put_contents($file, implode('', $this->writes), FILE_APPEND);
 
         // Flush index in batch

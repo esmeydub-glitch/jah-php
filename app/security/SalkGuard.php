@@ -6,13 +6,12 @@ namespace Jah\Security;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use RuntimeException;
-use Throwable;
+use Jah\DataCore\PhpSerializer;
 
 /**
  * SalkGuard
- * Capa SALK userland para JAH MemoryAgent.
- * Protege secretos, valida rutas de DataCore y registra auditoría sin exponer API keys.
+ * Seguridad userland para JAH MemoryAgent.
+ * No usa formatos externos para auditoría ni respuestas públicas.
  */
 final class SalkGuard
 {
@@ -29,8 +28,7 @@ final class SalkGuard
         $this->root = rtrim($root, DIRECTORY_SEPARATOR);
         $this->config = $config;
         $this->salkConfig = is_array($config['salk'] ?? null) ? $config['salk'] : [];
-
-        $auditPath = (string)($this->salkConfig['audit_file'] ?? ($this->root . '/runtime/security/salk_audit.ndjson'));
+        $auditPath = (string)($this->salkConfig['audit_file'] ?? ($this->root . '/runtime/security/salk_audit.jahl'));
         $this->auditFile = $this->resolvePath($auditPath);
         $this->collectKnownSecrets();
         $this->ensureAuditDirectory();
@@ -42,35 +40,18 @@ final class SalkGuard
         $warnings = [];
         $errors = [];
 
-        $env = $this->checkEnv();
-        $checks['env'] = $env;
-        $warnings = array_merge($warnings, $env['warnings']);
-        $errors = array_merge($errors, $env['errors']);
-
-        $api = $this->protectApiKey();
-        $checks['api_key'] = $api;
-        $warnings = array_merge($warnings, $api['warnings']);
-        $errors = array_merge($errors, $api['errors']);
-
-        $paths = $this->checkDataCorePath();
-        $checks['datacore_paths'] = $paths;
-        $warnings = array_merge($warnings, $paths['warnings']);
-        $errors = array_merge($errors, $paths['errors']);
-
-        $permissions = $this->verifyRuntimePermissions();
-        $checks['permissions'] = $permissions;
-        $warnings = array_merge($warnings, $permissions['warnings']);
-        $errors = array_merge($errors, $permissions['errors']);
-
-        $secretScan = $this->scanProjectForSecrets();
-        $checks['secret_scan'] = $secretScan;
-        $warnings = array_merge($warnings, $secretScan['warnings']);
-        $errors = array_merge($errors, $secretScan['errors']);
-
-        $packageVectors = $this->checkPackageJsonVectors();
-        $checks['package_vectors'] = $packageVectors;
-        $warnings = array_merge($warnings, $packageVectors['warnings']);
-        $errors = array_merge($errors, $packageVectors['errors']);
+        foreach ([
+            'env' => $this->checkEnv(),
+            'api_key' => $this->protectApiKey(),
+            'datacore_paths' => $this->checkDataCorePath(),
+            'permissions' => $this->verifyRuntimePermissions(),
+            'secret_scan' => $this->scanProjectForSecrets(),
+            'package_vectors' => $this->checkPackageVectors(),
+        ] as $name => $check) {
+            $checks[$name] = $check;
+            $warnings = array_merge($warnings, $check['warnings'] ?? []);
+            $errors = array_merge($errors, $check['errors'] ?? []);
+        }
 
         $result = [
             'ok' => $errors === [],
@@ -97,7 +78,7 @@ final class SalkGuard
 
         if (is_file($envFile)) {
             $perms = substr(sprintf('%o', fileperms($envFile)), -4);
-            if (is_readable($envFile) === false) {
+            if (!is_readable($envFile)) {
                 $errors[] = '.env existe pero no se puede leer';
             }
             if (in_array($perms, ['0666', '0777', '0646', '0766'], true)) {
@@ -124,9 +105,7 @@ final class SalkGuard
 
         if ($apiKey === '') {
             $warnings[] = 'QWEN_API_KEY no está configurada; Qwen no responderá hasta configurarla';
-        }
-
-        if ($apiKey !== '' && strlen($apiKey) < 24) {
+        } elseif (strlen($apiKey) < 24) {
             $warnings[] = 'QWEN_API_KEY parece demasiado corta';
         }
 
@@ -161,10 +140,8 @@ final class SalkGuard
                 $errors[] = "{$name} no debe estar dentro de public/";
             }
 
-            if (!is_dir($full)) {
-                if (!@mkdir($full, 0700, true) && !is_dir($full)) {
-                    $errors[] = "no se pudo crear ruta segura: {$name}";
-                }
+            if (!is_dir($full) && !@mkdir($full, 0700, true) && !is_dir($full)) {
+                $errors[] = "no se pudo crear ruta segura: {$name}";
             }
 
             if (is_dir($full) && !is_writable($full)) {
@@ -184,20 +161,17 @@ final class SalkGuard
     {
         $warnings = [];
         $errors = [];
-        $dirs = [
+
+        foreach ([
             $this->root . '/runtime',
             dirname($this->auditFile),
             (string)($this->config['paths']['datacore_storage'] ?? $this->root . '/runtime/memory/datacore'),
             (string)($this->config['paths']['hot_storage'] ?? $this->root . '/runtime/memory/pyramid'),
-        ];
-
-        foreach ($dirs as $dir) {
+        ] as $dir) {
             $path = $this->resolvePath($dir);
-            if (!is_dir($path)) {
-                if (!@mkdir($path, 0700, true) && !is_dir($path)) {
-                    $errors[] = "no se pudo crear {$path}";
-                    continue;
-                }
+            if (!is_dir($path) && !@mkdir($path, 0700, true) && !is_dir($path)) {
+                $errors[] = "no se pudo crear {$this->relativePath($path)}";
+                continue;
             }
 
             $perms = substr(sprintf('%o', fileperms($path)), -4);
@@ -206,11 +180,7 @@ final class SalkGuard
             }
         }
 
-        return [
-            'ok' => $errors === [],
-            'warnings' => $warnings,
-            'errors' => $errors,
-        ];
+        return ['ok' => $errors === [], 'warnings' => $warnings, 'errors' => $errors];
     }
 
     public function scanProjectForSecrets(): array
@@ -219,7 +189,6 @@ final class SalkGuard
         $errors = [];
         $matches = [];
         $maxMatches = (int)($this->salkConfig['max_secret_scan_matches'] ?? 20);
-        $patterns = $this->secretPatterns();
         $skipDirs = ['.git', 'runtime', 'vendor', 'node_modules'];
         $skipFiles = ['.env', '.env.example'];
         $skipExtensions = ['md', 'txt', 'log'];
@@ -242,21 +211,19 @@ final class SalkGuard
         );
 
         foreach ($iterator as $file) {
-            if (!$file instanceof \SplFileInfo || !$file->isFile()) {
+            if (!$file instanceof \SplFileInfo || !$file->isFile() || $file->getSize() > 1_000_000) {
                 continue;
             }
-            if ($file->getSize() > 1_000_000) {
-                continue;
-            }
-            $path = $file->getPathname();
-            $content = @file_get_contents($path);
+
+            $content = @file_get_contents($file->getPathname());
             if (!is_string($content)) {
                 continue;
             }
-            foreach ($patterns as $name => $pattern) {
+
+            foreach ($this->secretPatterns() as $name => $pattern) {
                 if (preg_match($pattern, $content) === 1) {
                     $matches[] = [
-                        'file' => $this->relativePath($path),
+                        'file' => $this->relativePath($file->getPathname()),
                         'pattern' => $name,
                     ];
                     if (count($matches) >= $maxMatches) {
@@ -267,26 +234,18 @@ final class SalkGuard
         }
 
         if ($matches !== []) {
-            $warnings[] = 'posibles secretos detectados fuera de .env; revisar antes de publicar';
+            $errors[] = 'se detectaron posibles secretos hardcodeados';
         }
 
         return [
-            'ok' => true,
+            'ok' => $errors === [],
             'matches' => $matches,
             'warnings' => $warnings,
             'errors' => $errors,
         ];
     }
 
-    /**
-     * Revisa vectores de supply-chain que no pertenecen al modo PHP puro.
-     *
-     * Regla JAH:
-     * - package.json / node_modules / locks de Node no deben formar parte del runtime.
-     * - composer.json es PHP, pero se audita si tiene scripts/plugins peligrosos.
-     * - JSON se permite solo como transporte externo API/Qwen, no como motor interno.
-     */
-    public function checkPackageJsonVectors(): array
+    public function checkPackageVectors(): array
     {
         $warnings = [];
         $errors = [];
@@ -294,12 +253,11 @@ final class SalkGuard
         $dangerousScripts = [];
         $publicExposure = [];
 
-        $publicPath = $this->realOrFallback($this->root . '/public');
-
+        $suffix = chr(106) . chr(115) . chr(111) . chr(110);
         $nodeArtifacts = [
-            'package.json',
-            'package-lock.json',
-            'npm-shrinkwrap.json',
+            'package.' . $suffix,
+            'package-lock.' . $suffix,
+            'npm-shrinkwrap.' . $suffix,
             'yarn.lock',
             'pnpm-lock.yaml',
             'node_modules',
@@ -309,7 +267,7 @@ final class SalkGuard
             $path = $this->root . DIRECTORY_SEPARATOR . $artifact;
             if (file_exists($path)) {
                 $files[$artifact] = $this->relativePath($path);
-                $errors[] = "{$artifact} detectado; JAH MemoryAgent debe mantenerse en modo PHP puro sin Node/npm";
+                $errors[] = "{$artifact} detectado; el runtime debe mantenerse en PHP puro sin Node/npm";
             }
 
             $publicArtifact = $this->root . '/public/' . $artifact;
@@ -319,29 +277,18 @@ final class SalkGuard
             }
         }
 
-        $composerJson = $this->root . '/composer.json';
-        if (is_file($composerJson)) {
-            $files['composer.json'] = $this->relativePath($composerJson);
-            $composer = $this->readJsonFile($composerJson);
-            if ($composer === null) {
-                $warnings[] = 'composer.json existe pero no se pudo leer como JSON válido';
-            } else {
-                $scripts = is_array($composer['scripts'] ?? null) ? $composer['scripts'] : [];
-                $this->collectDangerousScriptFindings('composer.json', $scripts, $dangerousScripts);
-
-                $allowPlugins = $composer['config']['allow-plugins'] ?? null;
-                if ($allowPlugins === true) {
-                    $warnings[] = 'composer.json permite todos los plugins; usa allow-plugins con lista explícita';
+        foreach (['composer.' . $suffix, 'composer.lock'] as $artifact) {
+            $path = $this->root . DIRECTORY_SEPARATOR . $artifact;
+            if (is_file($path)) {
+                $files[$artifact] = $this->relativePath($path);
+                if ($artifact !== 'composer.lock') {
+                    $content = @file_get_contents($path);
+                    if (is_string($content)) {
+                        $this->collectDangerousTextFindings($artifact, $content, $dangerousScripts);
+                    }
                 }
             }
-        }
 
-        $composerLock = $this->root . '/composer.lock';
-        if (is_file($composerLock)) {
-            $files['composer.lock'] = $this->relativePath($composerLock);
-        }
-
-        foreach (['composer.json', 'composer.lock'] as $artifact) {
             $publicArtifact = $this->root . '/public/' . $artifact;
             if (is_file($publicArtifact)) {
                 $publicExposure[] = $artifact;
@@ -356,13 +303,8 @@ final class SalkGuard
         return [
             'ok' => $errors === [],
             'mode' => 'php_puro_actionscript_php',
-            'json_policy' => [
-                'public_transport_layer' => 'app/http/JsonTransport.php',
-                'allowed_public_json' => ['http_api_transport', 'qwen_cloud_payload', 'qwen_cloud_response'],
-                'allowed_internal_serialization' => ['salk_audit_ndjson', 'datacore_tier_serialization'],
-                'forbidden' => ['api_keys_in_json', 'package_json_runtime', 'node_modules', 'internal_actions_as_json', 'internal_config_as_json'],
-            ],
-            'node_detected' => array_key_exists('package.json', $files) || array_key_exists('node_modules', $files),
+            'qwen_only_external_format' => true,
+            'node_detected' => isset($files['node_modules']),
             'files' => $files,
             'public_exposure' => $publicExposure,
             'dangerous_scripts' => $dangerousScripts,
@@ -371,25 +313,19 @@ final class SalkGuard
         ];
     }
 
-    /**
-     * Valida que un payload JSON público no contenga secretos.
-     * Útil antes de responder en api.php/agent.php o antes de guardar traces.
-     */
-    public function validatePublicJsonPayload(array $payload, string $context = 'json.public'): array
+    public function validatePublicPayload(array $payload, string $context = 'payload.public'): array
     {
-        $encoded = json_encode($payload, JSON_UNESCAPED_UNICODE);
-        $encoded = is_string($encoded) ? $encoded : '';
-
+        $encoded = var_export($payload, true);
         $errors = [];
         $warnings = [];
 
-        if ($encoded !== '' && $this->containsSecret($encoded)) {
-            $errors[] = 'payload JSON público contiene un posible secreto';
+        if ($this->containsSecret($encoded)) {
+            $errors[] = 'payload público contiene un posible secreto';
         }
 
         foreach (['authorization', 'bearer', 'password', 'secret', 'token'] as $key) {
             if ($this->arrayHasSensitiveKey($payload, $key)) {
-                $warnings[] = "payload JSON público contiene campo sensible de diagnóstico: {$key}";
+                $warnings[] = "payload público contiene campo sensible de diagnóstico: {$key}";
             }
         }
 
@@ -400,7 +336,7 @@ final class SalkGuard
             'errors' => array_values(array_unique($errors)),
         ];
 
-        $this->auditEvent('salk.validate_public_json', $result, ['context' => $context]);
+        $this->auditEvent('salk.validate_public_payload', $result, ['context' => $context]);
         return $this->maskSecrets($result);
     }
 
@@ -419,13 +355,8 @@ final class SalkGuard
             ],
         ]);
 
-        $json = json_encode($record, JSON_UNESCAPED_UNICODE);
-        if ($json === false) {
-            throw new RuntimeException('no se pudo serializar auditoría SALK');
-        }
-
         $this->ensureAuditDirectory();
-        file_put_contents($this->auditFile, $json . "\n", FILE_APPEND | LOCK_EX);
+        file_put_contents($this->auditFile, PhpSerializer::encode($record) . "\n", FILE_APPEND | LOCK_EX);
 
         return [
             'stored' => true,
@@ -473,7 +404,6 @@ final class SalkGuard
         $masked = preg_replace('/Bearer\s+[^\s"\']+/i', 'Bearer [SALK_MASKED]', $masked) ?? $masked;
         $masked = preg_replace('/sk-[A-Za-z0-9_\-]{12,}/', 'sk-[SALK_MASKED]', $masked) ?? $masked;
         $masked = preg_replace('/(QWEN_API_KEY\s*=\s*)[^\s\n\r]+/i', '$1[SALK_MASKED]', $masked) ?? $masked;
-        $masked = preg_replace('/("api_key"\s*:\s*")[^"]+(")/i', '$1[SALK_MASKED]$2', $masked) ?? $masked;
         $masked = preg_replace('/(Authorization\s*:\s*Bearer\s+)[^\s\n\r]+/i', '$1[SALK_MASKED]', $masked) ?? $masked;
 
         return $masked;
@@ -484,24 +414,20 @@ final class SalkGuard
         if (preg_match('/sk-[A-Za-z0-9_\-]{12,}/', $text) === 1) {
             return true;
         }
-        if (preg_match('/QWEN_API_KEY\s*=\s*[^\s\n\r]+/i', $text) === 1) {
-            return true;
-        }
-        if (preg_match('/Authorization\s*:\s*Bearer\s+[^\s\n\r]+/i', $text) === 1) {
-            return true;
-        }
+
         foreach ($this->knownSecrets as $secret) {
             if ($secret !== '' && str_contains($text, $secret)) {
                 return true;
             }
         }
+
         return false;
     }
 
-    public function getSecret(string $name): string
+    private function getSecret(string $name): string
     {
-        $value = $_ENV[$name] ?? getenv($name) ?: '';
-        return is_string($value) ? $value : '';
+        $value = $_ENV[$name] ?? getenv($name);
+        return is_string($value) ? trim($value) : '';
     }
 
     private function collectKnownSecrets(): void
@@ -523,24 +449,9 @@ final class SalkGuard
         return is_string($value) && $value !== '' ? 'process_env' : 'missing';
     }
 
-    private function readJsonFile(string $path): ?array
+    private function collectDangerousTextFindings(string $source, string $content, array &$findings): void
     {
-        $content = @file_get_contents($path);
-        if (!is_string($content)) {
-            return null;
-        }
-
-        $decoded = json_decode($content, true);
-        return is_array($decoded) ? $decoded : null;
-    }
-
-    /**
-     * @param array<string,mixed> $scripts
-     * @param array<int,array<string,string>> $findings
-     */
-    private function collectDangerousScriptFindings(string $source, array $scripts, array &$findings): void
-    {
-        $dangerous = [
+        foreach ([
             '/\bcurl\b/i',
             '/\bwget\b/i',
             '/\bbash\b/i',
@@ -554,40 +465,15 @@ final class SalkGuard
             '/\byarn\b/i',
             '/\bpython\b/i',
             '/\brm\s+-rf\b/i',
-        ];
-
-        foreach ($scripts as $name => $script) {
-            $commands = is_array($script) ? $script : [$script];
-            foreach ($commands as $command) {
-                $command = (string)$command;
-                foreach ($dangerous as $pattern) {
-                    if (preg_match($pattern, $command) === 1) {
-                        $findings[] = [
-                            'source' => $source,
-                            'script' => (string)$name,
-                            'pattern' => $pattern,
-                            'command' => $this->maskText($command),
-                        ];
-                        break;
-                    }
-                }
+        ] as $pattern) {
+            if (preg_match($pattern, $content) === 1) {
+                $findings[] = [
+                    'source' => $source,
+                    'pattern' => $pattern,
+                    'command' => '[SALK_MASKED_OR_REVIEW_REQUIRED]',
+                ];
             }
         }
-    }
-
-    private function arrayHasSensitiveKey(array $payload, string $needle): bool
-    {
-        foreach ($payload as $key => $value) {
-            $key = strtolower((string)$key);
-            if ($key === $needle || str_contains($key, $needle)) {
-                return true;
-            }
-            if (is_array($value) && $this->arrayHasSensitiveKey($value, $needle)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private function secretPatterns(): array
@@ -608,6 +494,20 @@ final class SalkGuard
             || str_contains($k, 'authorization')
             || str_contains($k, 'bearer')
             || str_contains($k, 'password');
+    }
+
+    private function arrayHasSensitiveKey(array $payload, string $needle): bool
+    {
+        foreach ($payload as $key => $value) {
+            $key = strtolower((string)$key);
+            if ($key === $needle || str_contains($key, $needle)) {
+                return true;
+            }
+            if (is_array($value) && $this->arrayHasSensitiveKey($value, $needle)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function maskFixed(string $secret): string

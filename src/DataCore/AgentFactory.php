@@ -37,11 +37,11 @@ final class AgentFactory
     }
 
     /**
-     * Crea agentes en lote desde esquema JSON
+     * Crea agentes en lote desde esquema PHP serializado
      */
     public static function fromSchema(string $schemaFile): self
     {
-        $schema = json_decode(file_get_contents($schemaFile), true);
+        $schema = PhpSerializer::decode(file_get_contents($schemaFile), true);
         $factory = new self(dirname($schemaFile));
 
         foreach ($schema['agents'] ?? [] as $agentDef) {
@@ -82,7 +82,7 @@ final class CollectorAgent implements AgentInterface
     public function __construct(array $config)
     {
         $this->source = $config['source'] ?? 'default';
-        $this->format = $config['format'] ?? 'json';
+        $this->format = $config['format'] ?? 'jahp';
     }
 
     public function run(mixed ...$data): array
@@ -101,7 +101,7 @@ final class CollectorAgent implements AgentInterface
 
     private function collectFile(string $path): array
     {
-        return json_decode(file_get_contents($path) ?: '[]', true);
+        return PhpSerializer::decode(file_get_contents($path) ?: '[]', true);
     }
 
     private function collectHttp(string $url): array
@@ -110,7 +110,7 @@ final class CollectorAgent implements AgentInterface
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         $response = curl_exec($ch);
         curl_close($ch);
-        return json_decode($response, true) ?: [];
+        return PhpSerializer::decode($response, true) ?: [];
     }
 
     private function collectStream(iterable $stream): array
@@ -236,7 +236,7 @@ final class EnricherAgent implements AgentInterface
             curl_close($ch);
 
             if ($enriched) {
-                $item[$field] = json_decode($enriched, true);
+                $item[$field] = PhpSerializer::decode($enriched, true);
             }
         }
 
@@ -256,14 +256,14 @@ final class ExporterAgent implements AgentInterface
 
     public function __construct(array $config)
     {
-        $this->format = $config['format'] ?? 'json';
+        $this->format = $config['format'] ?? 'jahp';
         $this->target = $config['target'] ?? 'file';
     }
 
     public function run(mixed ...$data): string
     {
         $content = match ($this->format) {
-            'json' => json_encode($data[0] ?? []),
+            'jahp' => PhpSerializer::encode($data[0] ?? []),
             'csv' => $this->toCsv($data[0] ?? []),
             'sql' => $this->toSql($data[0] ?? []),
             default => serialize($data[0] ?? []),

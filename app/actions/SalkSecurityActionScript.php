@@ -42,13 +42,13 @@ final class SalkSecurityActionScript
 
         ActionScript::define('salk.scan_package_vectors')
             ->timeout(1500)
-            ->handler(fn(array $data): array => $this->guard->checkPackageJsonVectors());
+            ->handler(fn(array $data): array => $this->guard->checkPackageVectors());
 
-        ActionScript::define('salk.validate_public_json')
+        ActionScript::define('salk.validate_public_payload')
             ->timeout(1000)
-            ->handler(fn(array $data): array => $this->guard->validatePublicJsonPayload(
+            ->handler(fn(array $data): array => $this->guard->validatePublicPayload(
                 is_array($data['payload'] ?? null) ? $data['payload'] : [],
-                (string)($data['context'] ?? 'json.public')
+                (string)($data['context'] ?? 'payload.public')
             ));
 
         ActionScript::define('salk.verify_runtime_permissions')

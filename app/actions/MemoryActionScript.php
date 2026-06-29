@@ -12,7 +12,7 @@ require_once __DIR__ . '/SalkSecurityActionScript.php';
 /**
  * MemoryActionScript
  * Runtime ActionScript PHP for the official MemoryAgent flow.
- * All actions are pure PHP and orchestrate DataCoreTurbo + MemoryPyramid + Qwen cURL.
+ * All actions are pure PHP and orchestrate DataCoreTurbo + MemoryPyramid + Qwen connector.
  */
 final class MemoryActionScript
 {
@@ -152,9 +152,9 @@ final class MemoryActionScript
         return $this->run('salk.scan_package_vectors', []);
     }
 
-    public function validatePublicJsonPayload(array $payload, string $context = 'json.public'): array
+    public function validatePublicPayload(array $payload, string $context = 'payload.public'): array
     {
-        return $this->run('salk.validate_public_json', [
+        return $this->run('salk.validate_public_payload', [
             'payload' => $payload,
             'context' => $context,
         ]);

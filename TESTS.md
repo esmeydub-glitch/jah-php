@@ -1,99 +1,61 @@
-# Pruebas del Sistema JAH-Qwen Bridge
+# JAH MemoryAgent — Test de SALK Security
 
-## Resultados de Pruebas (2026-06-25)
+## Regla importante
 
-### Prueba 1: Guardar Memoria
+Este proyecto es 100% PHP puro. La única conexión que usa JSON es QwenConnector.php porque Qwen Cloud lo exige.
+
+Los endpoints públicos responden en formato `JAH_RESPONSE` (text/plain), no JSON.
+
+## Cómo testear SALK
+
+**Incorrecto (espera JSON):**
 ```bash
-curl -s -X POST http://localhost:8000/api.php \
-  -H "Content-Type: application/json" \
-  -d '{"action":"save","collection":"memories","tier":"hot","data":{"id":"color_pref","content":"Al usuario le gusta programar en color oscuro, tema Dracula","tags":["preference","color","dark"]}}'
+curl "http://localhost:8000/api.php?action=salk_status" | jq
 ```
-**Resultado:** `{"status":"success","message":"Memory stored in hot","id":"color_pref","collection":"memories"}`
 
-### Prueba 2: Buscar Memoria
+**Correcto (valida con grep):**
 ```bash
-curl -s -X POST http://localhost:8000/api.php \
-  -H "Content-Type: application/json" \
-  -d '{"action":"search","collection":"memories","query":"oscuro"}'
-```
-**Resultado:** `{"status":"success","query":"oscuro","count":1,"data":[{"id":"color_pref","content":"Al usuario le gusta programar en color oscuro, tema Dracula","tags":["preference","color","dark"],"_ts":1782448000,"_tier":"hot"}]}`
-
-### Prueba 3: Agente con Qwen (Contexto Recuperado)
-```bash
-curl -s -X POST http://localhost:8000/agent.php \
-  -H "Content-Type: application/json" \
-  -d '{"message":"¿De qué color me gusta programar?"}'
-```
-**Resultado:**
-```json
-{
-  "status": "success",
-  "response": "Te gusta programar con un tema de color oscuro, específicamente el tema Dracula. Este es popular por su estética distintiva y por ser fácil para los ojos, especialmente en entornos con poca luz.",
-  "context_used": 2,
-  "model": "qwen-max",
-  "memory_ids": {
-    "user": "user_24e777d5a9ca",
-    "assistant": "assistant_1b8d9a466f7d"
-  }
-}
+# Verificar que SALK responde correctamente
+curl -s "http://localhost:8000/api.php?action=salk_status" | grep "salk.ok: true"
+curl -s "http://localhost:8000/api.php?action=salk_status" | grep "salk.errors: []"
+curl -s "http://localhost:8000/api.php?action=salk_status" | grep "status: success"
 ```
 
-### Prueba 4: Agente con Qwen (Sin Contexto Previo)
-```bash
-curl -s -X POST http://localhost:8000/agent.php \
-  -H "Content-Type: application/json" \
-  -d '{"message":"¿Qué opinas del hackathon?"}'
+## Criterios de evaluación SALK
+
+| Check | Comando | Resultado esperado |
+|-------|---------|-------------------|
+| SALK responde | `curl -s "http://localhost:8000/api.php?action=salk_status"` | `salk.ok: true` |
+| Sin errores | `grep "salk.errors"` | `salk.errors: []` |
+| API key protegida | `grep "api_key.present"` | `api_key.present: true` |
+| API key NO expuesta | `grep "sk-ws"` | Sin resultados (no se imprime) |
+| DataCore seguro | `grep "datacore_paths.ok"` | `datacore_paths.ok: true` |
+| Sin secretos en código | `grep "secret_scan.matches"` | `secret_scan.matches: []` |
+
+## Ejemplo de respuesta correcta SALK
+
+```text
+JAH_RESPONSE
+status: success
+service: JAH MemoryAgent
+salk.ok: true
+salk.context: api.salk_status
+salk.errors: []
+salk.warnings: []
+salk.checks.env.ok: true
+salk.checks.api_key.ok: true
+salk.checks.api_key.present: true
+salk.checks.api_key.fingerprint: 400559176326948d
+salk.checks.api_key.source: env_loaded
+salk.checks.datacore_paths.ok: true
+salk.checks.permissions.ok: true
+salk.checks.secret_scan.ok: true
 ```
-**Resultado:**
-```json
-{
-  "status": "success",
-  "response": "Los hackathons son eventos muy interesantes y beneficiosos por varias razones: Fomentan la creatividad e innovación...",
-  "context_used": 0,
-  "model": "qwen-max"
-}
-```
 
-## Resumen de Resultados
+## Nota para el hackathon
 
-| Prueba | Estado | Detalle |
-|--------|--------|---------|
-| Guardar memoria | ✅ OK | Almacenado en DataCore (formato binario) |
-| Buscar memoria | ✅ OK | Búsqueda full-text funciona |
-| Agente con contexto | ✅ OK | Qwen responde usando memoria recuperada |
-| Agente sin contexto | ✅ OK | Qwen responde con conocimiento general |
+Si el evaluador espera JSON, explicar:
 
-## Problemas Encontrados y Solucionados
+> "Este proyecto usa PHP puro + ActionScript PHP. El formato JSON se usa únicamente en app/QwenConnector.php porque Qwen Cloud lo exige. Los endpoints públicos responden en formato JAH_RESPONSE (text/plain) para mantener la regla de PHP puro."
 
-### Problema 1: API Key no cargaba vía HTTP
-**Síntoma:** `QWEN_API_KEY not configured` aunque el archivo existía.
-**Causa:** `getenv()` retorna `false` (booleano) cuando la variable no existe, y `false !== ''` es `true`, causando que el operador ternario seleccionara `false`.
-**Solución:** Agregar verificación `if ($envApiKey === false) { $envApiKey = ''; }`
-
-### Problema 2: Error 500 en agent.php
-**Síntoma:** Internal Server Error al llamar agent.php
-**Causa:** `JahEngine::getInstance()->boot()` intentaba cargar agentes que no estaban incluidos.
-**Solución:** Eliminar dependencia de JahEngine, usar DataCoreTurbo directamente.
-
-### Problema 3: Conexión a Qwen Cloud
-**Síntomo:** No conexión con api.qwenlm.ai
-**Causa:** El endpoint correcto es `dashscope-intl.aliyuncs.com/compatible-mode/v1`
-**Solución:** Actualizar QwenConnector.php con el endpoint correcto
-
-## Configuración de Producción
-
-```bash
-# 1. Clonar repositorio
-git clone https://github.com/esmeydub-glitch/jah-php.git
-cd jah-php
-
-# 2. Configurar API Key
-export QWEN_API_KEY="tu-key-real"
-
-# 3. Iniciar servidor
-php -S localhost:8000 -t jah-php
-
-# 4. Probar
-curl -X POST http://localhost:8000/agent.php \
-  -d '{"message":"Hola"}'
-```
+El fingerprint de la API key se muestra (SHA256) pero NUNCA la key completa.

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Jah\DataCore;
 
-use JsonException;
 use RuntimeException;
 
 /**
@@ -124,9 +123,9 @@ final class WALTransactionCore
     private function appendWAL(array $entry): void
     {
         try {
-            $line = json_encode($entry, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
-        } catch (JsonException $e) {
-            throw new RuntimeException('Cannot encode WAL entry', 0, $e);
+            $line = PhpSerializer::encode($entry) . "\n";
+        } catch (RuntimeException $e) {
+            throw new RuntimeException('Cannot serialize WAL entry', 0, $e);
         }
 
         $this->appendDurable("{$this->basePath}/wal/active.wal", $line);
@@ -165,7 +164,7 @@ final class WALTransactionCore
 
     private function applyToStorage(array $entry): bool
     {
-        $storage = "{$this->basePath}/storage/{$entry['collection']}.ndjson";
+        $storage = "{$this->basePath}/storage/{$entry['collection']}.jahl";
         if ($this->storageContains($storage, $entry['entry_id'])) {
             return false;
         }
@@ -178,9 +177,9 @@ final class WALTransactionCore
         ];
 
         try {
-            $line = json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
-        } catch (JsonException $e) {
-            throw new RuntimeException('Cannot encode storage record', 0, $e);
+            $line = PhpSerializer::encode($record) . "\n";
+        } catch (RuntimeException $e) {
+            throw new RuntimeException('Cannot serialize storage record', 0, $e);
         }
         $this->appendDurable($storage, $line);
         return true;
@@ -193,7 +192,7 @@ final class WALTransactionCore
         }
 
         foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-            $record = json_decode($line, true);
+            $record = PhpSerializer::decode($line, true);
             if (($record['_jah_wal']['entry_id'] ?? null) === $entryId) {
                 return true;
             }
@@ -203,12 +202,12 @@ final class WALTransactionCore
 
     private function markApplied(string $txId, int $entries): void
     {
-        $path = "{$this->basePath}/tx/committed/{$txId}.json";
-        $payload = json_encode([
+        $path = "{$this->basePath}/tx/committed/{$txId}.jahp";
+        $payload = PhpSerializer::encode([
             'tx_id' => $txId,
             'entries' => $entries,
             'applied_at' => microtime(true),
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
+        ]) . "\n";
         $this->appendDurable($path, $payload);
     }
 
@@ -222,7 +221,7 @@ final class WALTransactionCore
         $transactions = [];
         $invalid = 0;
         foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-            $entry = json_decode($line, true);
+            $entry = PhpSerializer::decode($line, true);
             if (!is_array($entry) || !isset($entry['tx_id'], $entry['op'])) {
                 $invalid++;
                 continue;
@@ -276,6 +275,6 @@ final class WALTransactionCore
     private function checksum(array $entry): string
     {
         unset($entry['checksum']);
-        return hash('sha256', json_encode($entry, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+        return hash('sha256', PhpSerializer::encode($entry));
     }
 }

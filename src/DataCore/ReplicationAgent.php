@@ -38,9 +38,9 @@ final class ReplicationAgent
 
     private function signEvent(array $event): array
     {
-        $event['hash'] = hash('sha256', json_encode($event));
+        $event['hash'] = hash('sha256', PhpSerializer::encode($event));
         $event['prev_hash'] = $this->getLastHash();
-        $event['signature'] = hash_hmac('sha512', json_encode($event), 'secret_key');
+        $event['signature'] = hash_hmac('sha512', PhpSerializer::encode($event), 'secret_key');
         return $event;
     }
 
@@ -52,7 +52,7 @@ final class ReplicationAgent
         }
 
         $lines = file($log);
-        $last = json_decode(end($lines), true);
+        $last = PhpSerializer::decode(end($lines), true);
         return $last['hash'] ?? '';
     }
 
@@ -60,8 +60,8 @@ final class ReplicationAgent
     {
         $ch = curl_init(rtrim($url, '/') . '/event');
         curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($event));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, PhpSerializer::encode($event));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/octet-stream']);
         curl_setopt($ch, CURLOPT_TIMEOUT, 2);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         
@@ -71,7 +71,7 @@ final class ReplicationAgent
         // Save to replication log
         file_put_contents(
             "{$this->basePath}/replication.log",
-            json_encode($event) . "\n",
+            PhpSerializer::encode($event) . "\n",
             FILE_APPEND
         );
 

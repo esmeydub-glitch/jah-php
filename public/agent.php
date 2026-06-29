@@ -6,20 +6,20 @@ $boot = require dirname(__DIR__) . '/app/bootstrap.php';
 $config = $boot['config'];
 
 use Jah\Memory\TieredMemory;
-use Jah\Http\JsonTransport;
+use Jah\Http\JahTransport;
 
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: text/plain; charset=utf-8');
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
 
-$input = JsonTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
+$input = JahTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
 
 $userMessage = trim((string)($input['message'] ?? ''));
 if ($userMessage === '') {
-    JsonTransport::respond(['status' => 'error', 'error' => 'No message provided.'], null, 'agent.error', 400);
+    JahTransport::respond(['status' => 'error', 'error' => 'No message provided.'], null, 400);
     exit;
 }
 
@@ -48,4 +48,4 @@ $output = [
 ];
 
 $tiered->close();
-JsonTransport::respond($output, $runtime->getSalkGuard(), 'agent.response');
+JahTransport::respond($output, $runtime->getSalkGuard());

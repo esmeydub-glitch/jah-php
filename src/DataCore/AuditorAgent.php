@@ -32,7 +32,7 @@ final class AuditorAgent
             }
 
             foreach (file($eventsFile) as $line) {
-                $event = json_decode($line, true);
+                $event = PhpSerializer::decode($line, true);
                 if ($event && !isset($idsInData[$event['payload']['id'] ?? ''])) {
                     $issues[] = "orphan_event:{$event['id']}";
                 }

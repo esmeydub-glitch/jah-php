@@ -23,8 +23,8 @@ final class SnapshotAgent
         $snapshot['records'] = $results;
         $snapshot['created_at'] = time();
 
-        $file = $this->basePath . "/{$collection}_" . time() . ".json";
-        file_put_contents($file, json_encode($snapshot, JSON_UNESCAPED_UNICODE));
+        $file = $this->basePath . "/{$collection}_" . time() . ".jahp";
+        file_put_contents($file, PhpSerializer::encode($snapshot));
 
         return $file;
     }
@@ -35,7 +35,7 @@ final class SnapshotAgent
             return false;
         }
 
-        $snapshot = json_decode(file_get_contents($snapshotFile), true);
+        $snapshot = PhpSerializer::decode(file_get_contents($snapshotFile), true);
         foreach ($snapshot['records'] ?? [] as $record) {
             $storage->insert('restored_' . time(), $record);
         }
@@ -45,6 +45,6 @@ final class SnapshotAgent
 
     public function listSnapshots(string $collection): array
     {
-        return glob($this->basePath . "/{$collection}_*.json") ?: [];
+        return glob($this->basePath . "/{$collection}_*.jahp") ?: [];
     }
 }

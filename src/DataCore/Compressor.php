@@ -14,10 +14,10 @@ final class Compressor
         return match ($algo) {
             'lz4' => function_exists('lzcompress')
                 ? lzcompress($data)
-                : self::jsonCompact($data),
+                : self::phpCompact($data),
             'zstd' => function_exists('zstd_compress')
                 ? zstd_compress($data)
-                : self::jsonCompact($data),
+                : self::phpCompact($data),
             'gzip' => gzencode($data),
             default => $data,
         };
@@ -37,10 +37,11 @@ final class Compressor
         };
     }
 
-    private static function jsonCompact(string $json): string
+    private static function phpCompact(string $payload): string
     {
-        // Compact JSON sin espacios
-        return json_encode(json_decode($json)) ?: $json;
+        // Compacta payload serializado PHP si es posible
+        $decoded = PhpSerializer::decode($payload);
+        return $decoded === null ? $payload : PhpSerializer::encode($decoded);
     }
 
     public static function compressFile(string $input, string $output, string $algo = 'gzip'): bool

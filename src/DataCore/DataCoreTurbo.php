@@ -9,7 +9,7 @@ namespace Jah\DataCore;
  * Pure PHP binary append-only storage for the JAH MemoryAgent.
  *
  * Record format:
- * [4 bytes little-endian length][JSON payload][newline]
+ * [4 bytes little-endian length][JAH PHP serialized payload][newline]
  *
  * Index format:
  * id:segment:offset:timestamp
@@ -73,12 +73,12 @@ final class DataCoreTurbo
         $file = "{$this->basePath}/data/{$collection}_{$segment}.bin";
         $indexFile = "{$this->basePath}/index/{$collection}.idx";
 
-        $json = json_encode(['id' => $id, 'payload' => $doc], JSON_UNESCAPED_UNICODE);
-        if ($json === false) {
+        $payload = PhpSerializer::encode(['id' => $id, 'payload' => $doc]);
+        if ($payload === '') {
             return;
         }
 
-        $record = pack('V', strlen($json)) . $json . "\n";
+        $record = pack('V', strlen($payload)) . $payload . "\n";
 
         $offset = is_file($file) ? (int) filesize($file) : 0;
         $handle = fopen($file, 'ab');
@@ -177,14 +177,14 @@ final class DataCoreTurbo
             return null;
         }
 
-        $json = fread($handle, $len);
+        $payload = fread($handle, $len);
         fgetc($handle);
 
-        if ($json === false || strlen($json) !== $len) {
+        if ($payload === false || strlen($payload) !== $len) {
             return null;
         }
 
-        $data = json_decode($json, true);
+        $data = PhpSerializer::decode($payload);
         if (!is_array($data) || !isset($data['payload'])) {
             return null;
         }

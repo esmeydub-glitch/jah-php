@@ -112,28 +112,15 @@ class HttpClient
     /**
      * Adjunta el cuerpo a la petición cURL según el tipo de datos proporcionado.
      */
-    private function attachPayload(\CurlHandle $ch, array $data, array &$headers): void
+    private function attachPayload($ch, array $data, array &$headers): void
     {
-        if (empty($data)) {
-            return;
+        $body = http_build_query($data);
+
+        if (!$this->hasHeader($headers, 'Content-Type')) {
+            $headers[] = 'Content-Type: application/x-www-form-urlencoded';
         }
 
-        $isJson = false;
-        foreach ($headers as $header) {
-            if (stripos($header, 'Content-Type: application/json') !== false) {
-                $isJson = true;
-                break;
-            }
-        }
-
-        if ($isJson) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data, JSON_THROW_ON_ERROR));
-            if (!$this->hasHeader($headers, 'Content-Type')) {
-                $headers[] = 'Content-Type: application/json';
-            }
-        } else {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($data));
-        }
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
     }
 
     private function parseHeaders(string $headerRaw): array

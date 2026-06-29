@@ -72,16 +72,16 @@ final class IndexAgent
         $indexFile = $this->basePath . "/{$collection}_{$field}.idx";
         $entries = [];
 
-        foreach (glob($this->basePath . "/../data/{$collection}_*.ndjson") as $file) {
+        foreach (glob($this->basePath . "/../data/{$collection}_*.jahl") as $file) {
             foreach (file($file) as $line) {
-                $record = json_decode($line, true);
+                $record = PhpSerializer::decode($line, true);
                 if ($record && isset($record['payload'][$field])) {
                     $entries[$record['id']] = $record['payload'][$field];
                 }
             }
         }
 
-        file_put_contents($indexFile, json_encode($entries));
+        file_put_contents($indexFile, PhpSerializer::encode($entries));
     }
 }
 
@@ -109,12 +109,12 @@ final class EventAgent
             'prev_hash' => $this->lastHash,
         ];
 
-        $event['hash'] = hash('sha256', json_encode($event));
+        $event['hash'] = hash('sha256', PhpSerializer::encode($event));
         $this->lastHash = $event['hash'];
 
         file_put_contents(
             $this->basePath . "/{$collection}.events",
-            json_encode($event) . "\n",
+            PhpSerializer::encode($event) . "\n",
             FILE_APPEND
         );
     }
@@ -135,7 +135,7 @@ final class TransactionAgent
     public function begin(string $txId): void
     {
         $journal = $this->basePath . "/pending/{$txId}.journal";
-        file_put_contents($journal, json_encode(['status' => 'started', 'ts' => time()]));
+        file_put_contents($journal, PhpSerializer::encode(['status' => 'started', 'ts' => time()]));
     }
 
     public function commit(string $txId): bool
@@ -177,9 +177,9 @@ final class SchemaAgent
 
     private function ensureCollection(string $name): void
     {
-        $schemaFile = $this->basePath . "/{$name}.json";
+        $schemaFile = $this->basePath . "/{$name}.jahp";
         if (!file_exists($schemaFile)) {
-            file_put_contents($schemaFile, json_encode([
+            file_put_contents($schemaFile, PhpSerializer::encode([
                 'name' => $name,
                 'fields' => [],
                 'created_at' => time(),
@@ -189,9 +189,9 @@ final class SchemaAgent
 
     public function addField(string $field, string $type): self
     {
-        $schema = json_decode(file_get_contents($this->basePath . "/{$this->collection}.json"), true);
+        $schema = PhpSerializer::decode(file_get_contents($this->basePath . "/{$this->collection}.jahp"), true);
         $schema['fields'][$field] = $type;
-        file_put_contents($this->basePath . "/{$this->collection}.json", json_encode($schema));
+        file_put_contents($this->basePath . "/{$this->collection}.jahp", PhpSerializer::encode($schema));
         return $this;
     }
 }
@@ -211,14 +211,14 @@ final class IntegrityAgent
     public function verify(string $collection): array
     {
         $issues = [];
-        $files = glob($this->basePath . "/../data/{$collection}_*.ndjson");
+        $files = glob($this->basePath . "/../data/{$collection}_*.jahl");
 
         foreach ($files as $file) {
             $lines = file($file);
             foreach ($lines as $num => $line) {
-                $record = json_decode($line, true);
+                $record = PhpSerializer::decode($line, true);
                 if ($record) {
-                    $expected = hash('sha256', json_encode($record['payload']));
+                    $expected = hash('sha256', PhpSerializer::encode($record['payload']));
                     if (!isset($record['hash']) || $record['hash'] !== $expected) {
                         $issues[] = "{$file}:{$num}";
                     }

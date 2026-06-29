@@ -7,6 +7,7 @@ namespace Jah\Memory;
 use Jah\DataCore\DataCoreTurbo;
 use Jah\DataCore\MemoryPyramid;
 use Jah\DataCore\Compressor;
+use Jah\DataCore\PhpSerializer;
 
 /**
  * TieredMemory
@@ -61,7 +62,7 @@ class TieredMemory
         $hotResults = $this->hot->query($collection, static function (array $doc) use ($queryLower, $terms): bool {
             if (($doc['_deleted'] ?? false) === true) return false;
             if (($doc['role'] ?? '') === 'assistant') return false;
-            $searchable = strtolower(json_encode($doc, JSON_UNESCAPED_UNICODE) ?: '');
+            $searchable = strtolower(PhpSerializer::searchable($doc));
             if ($queryLower !== '' && str_contains($searchable, $queryLower)) return true;
             foreach ($terms as $term) {
                 if ($term !== '' && str_contains($searchable, $term)) return true;
@@ -190,8 +191,8 @@ class TieredMemory
     {
         return array_merge($this->pyramid->stats(), [
             'hot_documents' => $this->hot->getStats()['documents'] ?? 0,
-            'warm_records' => $this->countNdjson($this->runtimeMemoryPath . '/warm'),
-            'cold_files' => count(glob($this->runtimeMemoryPath . '/cold/*.json.gz') ?: []),
+            'warm_records' => $this->countSerializedLines($this->runtimeMemoryPath . '/warm'),
+            'cold_files' => count(glob($this->runtimeMemoryPath . '/cold/*.jahp.gz') ?: []),
         ]);
     }
 
@@ -204,8 +205,8 @@ class TieredMemory
     {
         $dir = $this->runtimeMemoryPath . '/warm';
         if (!is_dir($dir)) mkdir($dir, 0700, true);
-        $file = $dir . '/warm_' . date('Ymd') . '.ndjson';
-        $record = json_encode(['key' => $id, 'payload' => $doc], JSON_UNESCAPED_UNICODE);
+        $file = $dir . '/warm_' . date('Ymd') . '.jahl';
+        $record = PhpSerializer::encode(['key' => $id, 'payload' => $doc]);
         if ($record !== false) {
             file_put_contents($file, $record . "\n", FILE_APPEND | LOCK_EX);
         }
@@ -215,10 +216,10 @@ class TieredMemory
     {
         $dir = $this->runtimeMemoryPath . '/cold';
         if (!is_dir($dir)) mkdir($dir, 0700, true);
-        $file = $dir . '/cold_' . $id . '_' . time() . '.json.gz';
-        $json = json_encode([$id => $doc], JSON_UNESCAPED_UNICODE);
-        if ($json !== false) {
-            file_put_contents($file, Compressor::compress($json, 'gzip'), LOCK_EX);
+        $file = $dir . '/cold_' . $id . '_' . time() . '.jahp.gz';
+        $payload = PhpSerializer::encode([$id => $doc]);
+        if ($payload !== '') {
+            file_put_contents($file, Compressor::compress($payload, 'gzip'), LOCK_EX);
         }
     }
 
@@ -226,9 +227,9 @@ class TieredMemory
     {
         $records = [];
         $dir = $this->runtimeMemoryPath . '/warm';
-        foreach (glob($dir . '/*.ndjson') ?: [] as $file) {
+        foreach (glob($dir . '/*.jahl') ?: [] as $file) {
             foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
-                $record = json_decode($line, true);
+                $record = PhpSerializer::decode($line, true);
                 $doc = is_array($record) ? ($record['payload'] ?? null) : null;
                 if (!is_array($doc) || ($doc['_deleted'] ?? false) === true || ($doc['role'] ?? '') === 'assistant') continue;
                 if ($this->matches($doc, $queryLower, $terms)) $records[] = $doc;
@@ -241,13 +242,13 @@ class TieredMemory
     {
         $records = [];
         $dir = $this->runtimeMemoryPath . '/cold';
-        foreach (glob($dir . '/*.json.gz') ?: [] as $file) {
+        foreach (glob($dir . '/*.jahp.gz') ?: [] as $file) {
             $tmp = tempnam(sys_get_temp_dir(), 'jah_cold_');
             if ($tmp === false) continue;
             $ok = Compressor::decompressFile($file, $tmp, 'gzip');
             $raw = $ok ? file_get_contents($tmp) : false;
             @unlink($tmp);
-            $data = $raw !== false ? json_decode($raw, true) : null;
+            $data = $raw !== false ? PhpSerializer::decode($raw, true) : null;
             if (!is_array($data)) continue;
             foreach ($data as $doc) {
                 if (!is_array($doc) || ($doc['_deleted'] ?? false) === true || ($doc['role'] ?? '') === 'assistant') continue;
@@ -259,7 +260,7 @@ class TieredMemory
 
     private function matches(array $doc, string $queryLower, array $terms): bool
     {
-        $searchable = strtolower(json_encode($doc, JSON_UNESCAPED_UNICODE) ?: '');
+        $searchable = strtolower(PhpSerializer::searchable($doc));
         if ($queryLower !== '' && str_contains($searchable, $queryLower)) return true;
         foreach ($terms as $term) {
             if ($term !== '' && str_contains($searchable, $term)) return true;
@@ -267,10 +268,10 @@ class TieredMemory
         return false;
     }
 
-    private function countNdjson(string $dir): int
+    private function countSerializedLines(string $dir): int
     {
         $count = 0;
-        foreach (glob($dir . '/*.ndjson') ?: [] as $file) {
+        foreach (glob($dir . '/*.jahl') ?: [] as $file) {
             $lines = file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
             $count += is_array($lines) ? count($lines) : 0;
         }
