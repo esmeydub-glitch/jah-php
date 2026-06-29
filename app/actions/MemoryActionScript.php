@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 use Jah\Actions\ActionScript;
 use Jah\Memory\TieredMemory;
+use Jah\Security\SalkGuard;
 
 require_once dirname(__DIR__, 2) . '/php_actionscript_php_doc/ActionScriptEngine.php';
+require_once __DIR__ . '/SalkSecurityActionScript.php';
 
 /**
  * MemoryActionScript
@@ -15,6 +17,7 @@ require_once dirname(__DIR__, 2) . '/php_actionscript_php_doc/ActionScriptEngine
 final class MemoryActionScript
 {
     private TieredMemory $memory;
+    private SalkGuard $salk;
     private array $config;
     private array $lastTrace = [];
 
@@ -22,12 +25,19 @@ final class MemoryActionScript
     {
         $this->memory = $memory;
         $this->config = $config;
+        $this->salk = new SalkGuard(dirname(__DIR__, 2), $config);
+        new SalkSecurityActionScript($this->salk);
         $this->registerActions();
     }
 
     public function runAgent(string $message, string $collection = 'memories', string $model = 'qwen-max'): array
     {
         $trace = [];
+
+        $salkPreflight = $this->run('salk.preflight', [
+            'context' => 'memoryagent.run',
+        ]);
+        $trace[] = $this->traceFromResult($salkPreflight);
 
         $classification = $this->run('memory.classify_input', [
             'message' => $message,
@@ -63,9 +73,21 @@ final class MemoryActionScript
         ]);
         $trace[] = $this->traceFromResult($store);
 
-        $this->lastTrace = $trace;
+        $audit = $this->run('salk.audit_event', [
+            'event' => 'memoryagent.run',
+            'result' => ['status' => 'success'],
+            'metadata' => [
+                'collection' => $collection,
+                'classification' => $classification['result']['type'] ?? 'unknown',
+                'stored' => $store['result']['stored'] ?? false,
+                'context_used' => count($retrieved['result']['memories'] ?? []),
+            ],
+        ]);
+        $trace[] = $this->traceFromResult($audit);
 
-        return [
+        $this->lastTrace = $this->salk->maskSecrets($trace);
+
+        return $this->salk->maskSecrets([
             'response' => $answer['result']['response'] ?? ($answer['error'] ?? 'Sin respuesta.'),
             'context_used' => count($retrieved['result']['memories'] ?? []),
             'context_preview' => $context['result']['context'] ?? '',
@@ -73,7 +95,11 @@ final class MemoryActionScript
             'classification' => $classification['result'] ?? [],
             'stored' => $store['result'] ?? [],
             'actions_trace' => $trace,
-        ];
+            'salk' => [
+                'preflight' => $salkPreflight['result'] ?? [],
+                'audit' => $audit['result'] ?? [],
+            ],
+        ]);
     }
 
     public function save(string $id, array $content, string $tier = 'hot'): array
@@ -111,6 +137,29 @@ final class MemoryActionScript
         return $this->lastTrace;
     }
 
+    public function getSalkGuard(): SalkGuard
+    {
+        return $this->salk;
+    }
+
+    public function runSalkPreflight(string $context = 'runtime'): array
+    {
+        return $this->run('salk.preflight', ['context' => $context]);
+    }
+
+    public function runSalkPackageVectorScan(): array
+    {
+        return $this->run('salk.scan_package_vectors', []);
+    }
+
+    public function validatePublicJsonPayload(array $payload, string $context = 'json.public'): array
+    {
+        return $this->run('salk.validate_public_json', [
+            'payload' => $payload,
+            'context' => $context,
+        ]);
+    }
+
     private function registerActions(): void
     {
         ActionScript::define('memory.classify_input')
@@ -128,6 +177,7 @@ final class MemoryActionScript
                 $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
                 $limit = max(1, min((int)($data['limit'] ?? 10), 50));
                 $memories = $this->memory->search($query, $collection, $limit);
+                $memories = is_array($memories) ? $this->salk->maskSecrets($memories) : [];
                 return ['memories' => $memories, 'count' => count($memories)];
             });
 
@@ -153,8 +203,9 @@ final class MemoryActionScript
                     $lines[] = 'Memorias recuperadas:';
                     foreach (array_slice($memories, 0, 10) as $item) {
                         if (!is_array($item)) continue;
-                        $content = $item['content'] ?? json_encode($item, JSON_UNESCAPED_UNICODE);
-                        if (is_array($content)) $content = json_encode($content, JSON_UNESCAPED_UNICODE);
+                        $content = $item['content'] ?? var_export($item, true);
+                        if (is_array($content)) $content = var_export($content, true);
+                        $content = $this->salk->maskText((string)$content);
                         $role = (string)($item['role'] ?? 'memory');
                         $tier = (string)($item['_memory_tier'] ?? $item['_tier'] ?? 'hot');
                         $lines[] = '- [' . $role . '|' . $tier . '] ' . substr((string)$content, 0, 280);
@@ -171,18 +222,34 @@ final class MemoryActionScript
                 $apiKey = (string)($_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?: '');
                 $model = (string)($data['model'] ?? $this->config['qwen']['model'] ?? getenv('QWEN_MODEL') ?: 'qwen-max');
                 $baseUrl = (string)($this->config['qwen']['base_url'] ?? getenv('QWEN_BASE_URL') ?: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1');
+                $message = (string)$data['message'];
+                $context = $this->salk->maskText((string)$data['context']);
+                if ($this->salk->containsSecret($message)) {
+                    return ['response' => 'SALK bloqueó el envío: el mensaje contiene un secreto o API key.', 'model' => $model, 'blocked_by_salk' => true];
+                }
                 require_once dirname(__DIR__) . '/QwenConnector.php';
                 $qwen = new QwenConnector($apiKey, $baseUrl);
-                return ['response' => $qwen->chat((string)$data['message'], (string)$data['context'], $model), 'model' => $model];
+                return ['response' => $qwen->chat($message, $context, $model), 'model' => $model];
             });
 
         ActionScript::define('memory.store_interaction')
             ->requires(['message', 'response'])
             ->timeout(3000)
             ->handler(function (array $data): array {
+                $message = (string)$data['message'];
                 $classification = is_array($data['classification'] ?? null)
                     ? $data['classification']
-                    : $this->classifyInput((string)$data['message']);
+                    : $this->classifyInput($message);
+
+                if ($this->salk->containsSecret($message)) {
+                    $this->salk->auditEvent('salk.secret_memory_blocked', ['ok' => true], ['type' => 'memory.store_interaction']);
+                    return [
+                        'stored' => false,
+                        'reason' => 'secret_detected_not_stored',
+                        'type' => 'secret_blocked',
+                        'tier' => null,
+                    ];
+                }
 
                 if (($classification['store'] ?? false) !== true) {
                     return [
@@ -197,7 +264,7 @@ final class MemoryActionScript
                 $uid = 'memory_' . bin2hex(random_bytes(6));
                 $this->memory->store($uid, [
                     'role' => 'user',
-                    'content' => (string)$data['message'],
+                    'content' => $this->salk->maskText($message),
                     'tags' => ['memory', (string)$classification['type'], 'classified'],
                     'importance' => (int)($classification['importance'] ?? 5),
                     'classification_reason' => (string)($classification['reason'] ?? 'stored'),
@@ -220,8 +287,14 @@ final class MemoryActionScript
             ->handler(function (array $data): array {
                 $tier = (string)($data['tier'] ?? 'hot');
                 $content = is_array($data['content']) ? $data['content'] : ['content' => (string)$data['content']];
+                $serialized = var_export($content, true);
+                if ($this->salk->containsSecret($serialized)) {
+                    $this->salk->auditEvent('salk.secret_save_blocked', ['ok' => true], ['id' => (string)$data['id']]);
+                    return ['id' => (string)$data['id'], 'tier' => $tier, 'saved' => false, 'reason' => 'secret_detected_not_stored'];
+                }
+                $content = $this->salk->maskSecrets($content);
                 $this->memory->store((string)$data['id'], $content, $tier);
-                return ['id' => (string)$data['id'], 'tier' => $tier];
+                return ['id' => (string)$data['id'], 'tier' => $tier, 'saved' => true];
             });
 
         ActionScript::define('memory.retrieve')
@@ -229,6 +302,7 @@ final class MemoryActionScript
             ->timeout(3000)
             ->handler(function (array $data): array {
                 $memory = $this->memory->retrieve((string)$data['id']);
+                $memory = $memory !== null ? $this->salk->maskSecrets($memory) : null;
                 return ['id' => (string)$data['id'], 'memory' => $memory, 'found' => $memory !== null];
             });
 
@@ -257,13 +331,18 @@ final class MemoryActionScript
 
     private function traceFromResult(array $result): array
     {
-        return [
-            'action' => $result['action'] ?? 'unknown',
+        $action = (string)($result['action'] ?? 'unknown');
+        $decision = in_array($action, ['memory.classify_input', 'salk.preflight', 'salk.protect_api_key'], true)
+            ? ($result['result'] ?? null)
+            : null;
+
+        return $this->salk->maskSecrets([
+            'action' => $action,
             'success' => (bool)($result['success'] ?? false),
             'duration_ms' => isset($result['duration_ms']) ? round((float)$result['duration_ms'], 3) : null,
             'error' => $result['error'] ?? null,
-            'decision' => ($result['action'] ?? '') === 'memory.classify_input' ? ($result['result'] ?? null) : null,
-        ];
+            'decision' => $decision,
+        ]);
     }
 
     private function classifyInput(string $message): array

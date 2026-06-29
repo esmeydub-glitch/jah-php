@@ -92,7 +92,7 @@ class MemoryAgent extends BaseAgent
             $sql = "INSERT INTO jah_events (event_id, event_type, payload, source, created_at)
                     VALUES (:id, :type, :payload, :source, NOW())";
 
-            $payload = json_encode($event['payload'] ?? [], JSON_THROW_ON_ERROR);
+            $payload = serialize($event['payload'] ?? []);
 
             $this->db->query($sql, [
                 'id'      => $event['id'],

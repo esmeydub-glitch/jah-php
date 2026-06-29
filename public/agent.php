@@ -6,6 +6,7 @@ $boot = require dirname(__DIR__) . '/app/bootstrap.php';
 $config = $boot['config'];
 
 use Jah\Memory\TieredMemory;
+use Jah\Http\JsonTransport;
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -14,26 +15,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     exit;
 }
 
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$input = [];
-
-if ($method === 'POST') {
-    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-    if (str_contains($contentType, 'application/json')) {
-        $rawBody = file_get_contents('php://input');
-        $decoded = $rawBody ? json_decode($rawBody, true) : [];
-        $input = is_array($decoded) ? $decoded : [];
-    } else {
-        $input = $_POST;
-    }
-} else {
-    $input = $_GET;
-}
+$input = JsonTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
 
 $userMessage = trim((string)($input['message'] ?? ''));
 if ($userMessage === '') {
-    http_response_code(400);
-    echo json_encode(['error' => 'No message provided.'], JSON_UNESCAPED_UNICODE);
+    JsonTransport::respond(['status' => 'error', 'error' => 'No message provided.'], null, 'agent.error', 400);
     exit;
 }
 
@@ -48,9 +34,8 @@ require_once dirname(__DIR__) . '/app/actions/MemoryActionScript.php';
 $runtime = new MemoryActionScript($tiered, $config);
 
 $result = $runtime->runAgent($userMessage, $collection, $model);
-$tiered->close();
 
-echo json_encode([
+$output = [
     'status' => 'success',
     'response' => $result['response'],
     'model' => $model,
@@ -60,4 +45,7 @@ echo json_encode([
     'classification' => $result['classification'] ?? [],
     'stored' => $result['stored'] ?? [],
     'actions_trace' => $result['actions_trace'],
-], JSON_UNESCAPED_UNICODE);
+];
+
+$tiered->close();
+JsonTransport::respond($output, $runtime->getSalkGuard(), 'agent.response');

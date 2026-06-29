@@ -6,6 +6,7 @@ $boot = require dirname(__DIR__) . '/app/bootstrap.php';
 $config = $boot['config'];
 
 use Jah\Memory\TieredMemory;
+use Jah\Http\JsonTransport;
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -21,14 +22,7 @@ require_once dirname(__DIR__) . '/app/actions/MemoryActionScript.php';
 $runtime = new MemoryActionScript($tiered, $config);
 
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-$input = [];
-if ($method === 'POST') {
-    $raw = file_get_contents('php://input');
-    $decoded = $raw ? json_decode($raw, true) : [];
-    $input = is_array($decoded) ? $decoded : $_POST;
-} else {
-    $input = $_GET;
-}
+$input = JsonTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
 
 $action = (string)($input['action'] ?? ($method === 'GET' ? 'status' : 'chat'));
 $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($input['collection'] ?? 'memories')) ?: 'memories';
@@ -36,13 +30,25 @@ $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($input['collection'
 try {
     switch ($action) {
         case 'status':
+            $salkStatus = $runtime->runSalkPreflight('api.status');
             $output = [
                 'status' => 'success',
                 'service' => 'JAH MemoryAgent',
                 'runtime' => 'PHP puro + ActionScript PHP',
                 'qwen_cloud' => 'DashScope compatible API via native PHP cURL',
                 'memory' => 'DataCoreTurbo + MemoryPyramid Hot/Warm/Cold',
+                'salk' => $salkStatus['result'] ?? [],
             ];
+            break;
+
+        case 'salk_status':
+            $salkStatus = $runtime->runSalkPreflight('api.salk_status');
+            $output = ['status' => 'success', 'salk' => $salkStatus['result'] ?? []];
+            break;
+
+        case 'salk_package_vectors':
+            $vectors = $runtime->runSalkPackageVectorScan();
+            $output = ['status' => 'success', 'package_vectors' => $vectors['result'] ?? []];
             break;
 
         case 'stats':
@@ -121,4 +127,4 @@ try {
 }
 
 $tiered->close();
-echo json_encode($output, JSON_UNESCAPED_UNICODE);
+JsonTransport::respond($output, $runtime->getSalkGuard(), 'api.response');

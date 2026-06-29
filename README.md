@@ -22,9 +22,10 @@
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  ActionScript PHP Runtime                                   │
-│  memory.search_context → memory.build_context               │
-│  qwen.ask → memory.store_interaction                        │
-│  Controla eventos, estado y ciclo de memoria                │
+│  salk.preflight → memory.search_context                     │
+│  memory.build_context → qwen.ask                            │
+│  memory.store_interaction → salk.audit_event                │
+│  Controla eventos, seguridad y ciclo de memoria             │
 └──────────────────────┬──────────────────────────────────────┘
                        │
        ┌───────────────┴────────────────┐
@@ -42,6 +43,12 @@
 │  Qwen Cloud / DashScope Intl Compatible API                 │
 │  app/QwenConnector.php — PHP cURL nativo                    │
 └─────────────────────────────────────────────────────────────┘
+                               ▲
+                               │
+┌─────────────────────────────────────────────────────────────┐
+│  SALK Security ActionScript                                 │
+│  Protege QWEN_API_KEY, DataCore, traces y auditoría         │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -58,6 +65,7 @@
 │   ├── bootstrap.php        # Carga .env, autoloader / .env loader, autoloader
 │   ├── QwenConnector.php    # Cliente Qwen Cloud por cURL / Qwen cURL client
 │   ├── actions/             # ActionScript PHP runtime actions
+│   ├── security/            # SALK Guard / Protección de secretos y DataCore
 │   ├── config/              # Configuración por env / Env-based configuration
 │   ├── core/                # Motor central / Core engine
 │   ├── agents/              # Agentes internos / Internal agents
@@ -75,6 +83,7 @@
 ├── jah-datacore/            # Paquete original DataCore / Original DataCore package
 ├── runtime/                 # Datos persistentes / Persistent data (gitignored)
 ├── .env.example             # Plantilla / Template
+├── SALK_SECURITY.md         # Documentación SALK / SALK documentation
 └── README.md
 ```
 
@@ -150,7 +159,8 @@ curl -X POST http://localhost:8000/agent.php \
 
 | Método/Method | Endpoint | Descripción/Description |
 |---------------|----------|------------------------|
-| `GET` | `/api.php?action=status` | Estado del servicio / Service status |
+| `GET` | `/api.php?action=status` | Estado del servicio + SALK / Service status + SALK |
+| `GET` | `/api.php?action=salk_status` | Estado de seguridad SALK / SALK security status |
 | `GET` | `/api.php?action=stats` | Estadísticas / Statistics |
 | `POST` | `/api.php` | Guardar, buscar, recuperar, olvidar, migrar / Save, search, retrieve, forget, migrate |
 | `POST` | `/agent.php` | Ejecutar MemoryAgent con Qwen Cloud / Run MemoryAgent with Qwen Cloud |
@@ -242,10 +252,22 @@ php -S 0.0.0.0:8000 -t public
 
 ## Seguridad / Security
 
-- **API key solo en `.env` o variable de entorno** — Nunca hardcodeada / Never hardcoded
-- **`.env` excluido de git** — `.gitignore` lo ignora / `.gitignore` excludes it
-- **Sin Python, Node.js ni DB externa en el runtime principal** / No Python, Node.js, or external DB in the main runtime
-- **Configuración vía variables de entorno** / Configuration through environment variables
+- **SALK Security ActionScript** ejecuta `salk.preflight` antes del agente y `salk.audit_event` al cerrar el flujo.
+- **API key solo en `.env` o variable de entorno** — Nunca hardcodeada / Never hardcoded.
+- **QWEN_API_KEY no se imprime**: SALK solo expone fingerprint corto y enmascara tokens en traces/logs.
+- **Bloqueo de secretos en memoria**: si un usuario intenta guardar una API key, SALK lo bloquea.
+- **DataCore fuera de `public/`**: SALK valida que `runtime/memory` no quede expuesto por HTTP.
+- **Auditoría NDJSON** en `runtime/security/salk_audit.ndjson`.
+- **`.env` excluido de git** — `.gitignore` lo ignora / `.gitignore` excludes it.
+- **Sin Python, Node.js ni DB externa en el runtime principal** / No Python, Node.js, or external DB in the main runtime.
+
+### Verificar SALK / Check SALK
+
+```bash
+curl "http://localhost:8000/api.php?action=salk_status" | jq
+```
+
+Ver más / See more: [`SALK_SECURITY.md`](SALK_SECURITY.md)
 
 ---
 

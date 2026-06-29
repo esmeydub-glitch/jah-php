@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Jah\Http\JsonTransport;
+
 class QwenConnector
 {
     private string $apiKey;
@@ -38,9 +40,10 @@ class QwenConnector
             ],
         ];
 
-        $jsonPayload = json_encode($data, JSON_UNESCAPED_UNICODE);
-        if ($jsonPayload === false) {
-            return 'Error: no se pudo serializar la petición para Qwen.';
+        try {
+            $jsonPayload = JsonTransport::encodeQwenPayload($data);
+        } catch (Throwable $e) {
+            return 'Error: no se pudo preparar la petición segura para Qwen: ' . $e->getMessage();
         }
 
         $ch = curl_init($this->baseUrl . '/chat/completions');
@@ -78,8 +81,8 @@ class QwenConnector
 
     private function parseResponse(string $response): string
     {
-        $result = json_decode($response, true);
-        if (!is_array($result)) {
+        $result = JsonTransport::decodeQwenResponse($response);
+        if ($result === []) {
             return 'Respuesta no JSON de Qwen: ' . substr($response, 0, 300);
         }
 

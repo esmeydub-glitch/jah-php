@@ -30,6 +30,7 @@ $memoryResults = [];
 $actionsTrace = [];
 $classificationResult = [];
 $storedResult = [];
+$salkResult = [];
 
 switch ($action) {
     case 'save':
@@ -61,7 +62,7 @@ switch ($action) {
 
     case 'migrate':
         $result = $runtime->migrate();
-        $feedback = 'Migración ejecutada: ' . json_encode($result['result'] ?? [], JSON_UNESCAPED_UNICODE);
+        $feedback = 'Migración ejecutada: ' . php_dump($result['result'] ?? []);
         $action = 'stats';
         // no break
 
@@ -81,6 +82,7 @@ switch ($action) {
             $actionsTrace = is_array($result['actions_trace'] ?? null) ? $result['actions_trace'] : [];
             $classificationResult = is_array($result['classification'] ?? null) ? $result['classification'] : [];
             $storedResult = is_array($result['stored'] ?? null) ? $result['stored'] : [];
+            $salkResult = is_array($result['salk'] ?? null) ? $result['salk'] : [];
         }
         break;
 }
@@ -88,8 +90,11 @@ switch ($action) {
 $tiered->close();
 
 function e(mixed $value): string { return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'); }
+function php_dump(mixed $value): string {
+    return var_export($value, true);
+}
 function brief(mixed $value, int $length = 220): string {
-    $text = is_string($value) ? $value : (json_encode($value, JSON_UNESCAPED_UNICODE) ?: '');
+    $text = is_string($value) ? $value : php_dump($value);
     return substr($text, 0, $length);
 }
 ?>
@@ -134,6 +139,7 @@ function brief(mixed $value, int $length = 220): string {
         <div class="chip">Qwen Cloud: cURL native</div>
         <div class="chip">DataCoreTurbo: binary memory</div>
         <div class="chip">MemoryPyramid: Hot / Warm / Cold</div>
+        <div class="chip">SALK Security: ACTIVE</div>
     </div>
 
     <div class="nav">
@@ -165,7 +171,7 @@ function brief(mixed $value, int $length = 220): string {
         <strong>Guardar / Store:</strong> <?= e(($classificationResult['store'] ?? false) ? 'sí / yes' : 'no') ?><br>
         <strong>Tipo / Type:</strong> <?= e($classificationResult['type'] ?? 'N/A') ?><br>
         <strong>Razón / Reason:</strong> <?= e($classificationResult['reason'] ?? 'N/A') ?><br>
-        <strong>Resultado de guardado / Store result:</strong> <?= e(json_encode($storedResult, JSON_UNESCAPED_UNICODE)) ?>
+        <strong>Resultado de guardado / Store result:</strong> <?= e(php_dump($storedResult)) ?>
     </div>
 
     <h2>Memorias recuperadas / Retrieved memories (<?= count($memoryResults) ?>)</h2>
@@ -182,8 +188,11 @@ function brief(mixed $value, int $length = 220): string {
     <h2>Contexto enviado a Qwen / Context sent to Qwen</h2>
     <pre><?= e($contextPreview) ?></pre>
 
+    <h2>SALK Security</h2>
+    <pre><?= e(php_dump($salkResult)) ?></pre>
+
     <h2>ActionScript PHP trace</h2>
-    <pre><?= e(json_encode($actionsTrace, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) ?></pre>
+    <pre><?= e(php_dump($actionsTrace)) ?></pre>
     <?php endif; ?>
 
     <?php elseif ($action === 'save'): ?>
@@ -234,7 +243,7 @@ function brief(mixed $value, int $length = 220): string {
 
     <?php else: ?>
     <h2>Estadísticas / Statistics</h2>
-    <div class="item"><pre><?= e(json_encode($statsData ?? [], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) ?></pre></div>
+    <div class="item"><pre><?= e(php_dump($statsData ?? [])) ?></pre></div>
     <?php endif; ?>
 </body>
 </html>
