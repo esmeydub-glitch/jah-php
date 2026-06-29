@@ -23,6 +23,7 @@ class TieredMemory
     private string $storagePath;
     private string $pyramidPath;
     private string $runtimeMemoryPath;
+    private array $lastSearchMetrics = [];
 
     private const HOT_TTL = 3600;
     private const WARM_TTL = 86400;
@@ -54,44 +55,45 @@ class TieredMemory
 
     public function search(string $query, string|array $collectionOrTiers = 'memories', int $limit = 20): array
     {
-        $collection = is_array($collectionOrTiers) ? 'memories' : $collectionOrTiers;
-        $queryLower = strtolower($query);
-        $terms = array_values(array_filter(explode(' ', $queryLower)));
-        $allResults = [];
+        $startedAt = hrtime(true);
+        $collection = $this->normalizeCollection(is_array($collectionOrTiers) ? 'memories' : $collectionOrTiers);
+        $queryLower = $this->normalizeSearchText($query);
+        $terms = preg_split('/[^\p{L}\p{N}_-]+/u', $queryLower, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $candidateLimit = max(50, min(300, $limit * 5));
+        $candidates = $this->hot->searchIndexed($collection, $queryLower, $candidateLimit);
 
-        $hotResults = $this->hot->query($collection, static function (array $doc) use ($queryLower, $terms): bool {
-            if (($doc['_deleted'] ?? false) === true) return false;
-            if (($doc['role'] ?? '') === 'assistant') return false;
-            $searchable = strtolower(PhpSerializer::searchable($doc));
-            if ($queryLower !== '' && str_contains($searchable, $queryLower)) return true;
-            foreach ($terms as $term) {
-                if ($term !== '' && str_contains($searchable, $term)) return true;
-            }
-            return false;
+        $allResults = [];
+        foreach ($candidates as $doc) {
+            if (($doc['_deleted'] ?? false) === true || ($doc['role'] ?? '') === 'assistant') continue;
+            if (!$this->matches($doc, $queryLower, $terms)) continue;
+            $doc['_memory_tier'] = $this->normalizeTier((string)($doc['_tier'] ?? 'hot'));
+            $allResults[] = $doc;
+        }
+
+        usort($allResults, static function (array $a, array $b): int {
+            $score = (int)($b['_search_score'] ?? 0) <=> (int)($a['_search_score'] ?? 0);
+            return $score !== 0 ? $score : ((int)($b['_ts'] ?? 0) <=> (int)($a['_ts'] ?? 0));
         });
 
-        foreach ($hotResults as $doc) {
-            $doc['_memory_tier'] = $doc['_tier'] ?? 'hot';
-            $allResults[] = $doc;
-        }
-
-        foreach ($this->readWarmRecords($queryLower, $terms) as $doc) {
-            $doc['_memory_tier'] = 'warm';
-            $allResults[] = $doc;
-        }
-
-        foreach ($this->readColdRecords($queryLower, $terms) as $doc) {
-            $doc['_memory_tier'] = 'cold';
-            $allResults[] = $doc;
-        }
-
-        usort($allResults, static fn(array $a, array $b): int => (int)($b['_ts'] ?? 0) <=> (int)($a['_ts'] ?? 0));
-
-        return array_slice($allResults, 0, $limit);
+        $results = array_slice($allResults, 0, $limit);
+        $this->lastSearchMetrics = [
+            'strategy' => 'datacore_inverted_index_v3',
+            'collection' => $collection,
+            'candidate_count' => count($candidates),
+            'result_count' => count($results),
+            'duration_ms' => round((hrtime(true) - $startedAt) / 1_000_000, 3),
+        ];
+        return $results;
     }
 
-    public function store(string $first, mixed $second, mixed $third = 'hot'): bool
+    public function getLastSearchMetrics(): array
     {
+        return $this->lastSearchMetrics;
+    }
+
+    public function store(string $first, mixed $second, mixed $third = 'hot', string $collection = 'memories'): bool
+    {
+        $collection = $this->normalizeCollection($collection);
         if (is_string($second) && is_array($third)) {
             // Legacy style: store($tier, $key, $data)
             $tier = $this->normalizeTier($first);
@@ -107,10 +109,11 @@ class TieredMemory
         $content['id'] = $id;
         $content['_ts'] = $content['_ts'] ?? time();
         $content['_tier'] = $tier;
+        $content['_collection'] = $collection;
 
-        $this->hot->insert('memories', $content);
+        $this->hot->insert($collection, $content);
         $this->hot->flush();
-        $this->pyramid->set($id, $content, $tier === 'cold' ? self::COLD_TTL : 0);
+        $this->pyramid->set($this->storageKey($collection, $id), $content, 0, $tier);
 
         if ($tier === 'warm') {
             $this->appendWarm($id, $content);
@@ -121,15 +124,19 @@ class TieredMemory
         return true;
     }
 
-    public function retrieve(string $tierOrId, ?string $key = null): ?array
+    public function retrieve(string $tierOrId, ?string $key = null, string $collection = 'memories'): ?array
     {
+        $collection = $this->normalizeCollection($collection);
         $id = $key ?? $tierOrId;
-        $fromTurbo = $this->hot->find('memories', $id);
+        $fromTurbo = $this->hot->find($collection, $id);
         if ($fromTurbo !== null) {
             return $fromTurbo;
         }
 
-        $fromPyramid = $this->pyramid->get($id);
+        $fromPyramid = $this->pyramid->get($this->storageKey($collection, $id));
+        if ($fromPyramid === null && $collection === 'memories') {
+            $fromPyramid = $this->pyramid->get($id);
+        }
         if (is_array($fromPyramid) && ($fromPyramid['_deleted'] ?? false) === true) {
             return null;
         }
@@ -138,12 +145,19 @@ class TieredMemory
 
     public function forget(string $id, string $collection = 'memories'): void
     {
+        $collection = $this->normalizeCollection($collection);
         $this->hot->delete($collection, $id);
-        $this->pyramid->set($id, ['id' => $id, '_deleted' => true, '_ts' => time()]);
+        $this->pyramid->set(
+            $this->storageKey($collection, $id),
+            ['id' => $id, '_collection' => $collection, '_deleted' => true, '_ts' => time()],
+            0,
+            'warm'
+        );
     }
 
     public function migrate(string $collection = 'memories'): array
     {
+        $collection = $this->normalizeCollection($collection);
         $migrated = ['hot_to_warm' => 0, 'warm_to_cold' => 0];
         $now = time();
 
@@ -160,11 +174,13 @@ class TieredMemory
             if ($currentTier === 'hot' && $age > self::HOT_TTL) {
                 $doc['_tier'] = 'warm';
                 $this->appendWarm($id, $doc);
+                $this->pyramid->set($this->storageKey($collection, $id), $doc, 0, 'warm');
                 $this->hot->insert($collection, $doc);
                 $migrated['hot_to_warm']++;
             } elseif ($currentTier === 'warm' && $age > self::WARM_TTL) {
                 $doc['_tier'] = 'cold';
                 $this->appendCold($id, $doc);
+                $this->pyramid->set($this->storageKey($collection, $id), $doc, 0, 'cold');
                 $this->hot->insert($collection, $doc);
                 $migrated['warm_to_cold']++;
             }
@@ -187,13 +203,20 @@ class TieredMemory
         return $events;
     }
 
-    public function stats(): array
+    public function stats(string $collection = 'memories'): array
     {
+        $collection = $this->normalizeCollection($collection);
         return array_merge($this->pyramid->stats(), [
             'hot_documents' => $this->hot->getStats()['documents'] ?? 0,
             'warm_records' => $this->countSerializedLines($this->runtimeMemoryPath . '/warm'),
             'cold_files' => count(glob($this->runtimeMemoryPath . '/cold/*.jahp.gz') ?: []),
+            'search_index' => $this->hot->getIndexStats($collection),
         ]);
+    }
+
+    public function rebuildIndexes(string $collection = 'memories'): array
+    {
+        return $this->hot->rebuildIndexes($this->normalizeCollection($collection));
     }
 
     public function close(): void
@@ -216,14 +239,14 @@ class TieredMemory
     {
         $dir = $this->runtimeMemoryPath . '/cold';
         if (!is_dir($dir)) mkdir($dir, 0700, true);
-        $file = $dir . '/cold_' . $id . '_' . time() . '.jahp.gz';
+        $file = $dir . '/cold_' . hash('sha256', $id) . '_' . time() . '.jahp.gz';
         $payload = PhpSerializer::encode([$id => $doc]);
         if ($payload !== '') {
             file_put_contents($file, Compressor::compress($payload, 'gzip'), LOCK_EX);
         }
     }
 
-    private function readWarmRecords(string $queryLower, array $terms): array
+    private function readWarmRecords(string $collection): array
     {
         $records = [];
         $dir = $this->runtimeMemoryPath . '/warm';
@@ -231,14 +254,15 @@ class TieredMemory
             foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
                 $record = PhpSerializer::decode($line, true);
                 $doc = is_array($record) ? ($record['payload'] ?? null) : null;
-                if (!is_array($doc) || ($doc['_deleted'] ?? false) === true || ($doc['role'] ?? '') === 'assistant') continue;
-                if ($this->matches($doc, $queryLower, $terms)) $records[] = $doc;
+                if (!is_array($doc)) continue;
+                if ((string)($doc['_collection'] ?? 'memories') !== $collection) continue;
+                $records[] = $doc;
             }
         }
         return $records;
     }
 
-    private function readColdRecords(string $queryLower, array $terms): array
+    private function readColdRecords(string $collection): array
     {
         $records = [];
         $dir = $this->runtimeMemoryPath . '/cold';
@@ -251,8 +275,9 @@ class TieredMemory
             $data = $raw !== false ? PhpSerializer::decode($raw, true) : null;
             if (!is_array($data)) continue;
             foreach ($data as $doc) {
-                if (!is_array($doc) || ($doc['_deleted'] ?? false) === true || ($doc['role'] ?? '') === 'assistant') continue;
-                if ($this->matches($doc, $queryLower, $terms)) $records[] = $doc;
+                if (!is_array($doc)) continue;
+                if ((string)($doc['_collection'] ?? 'memories') !== $collection) continue;
+                $records[] = $doc;
             }
         }
         return $records;
@@ -260,12 +285,20 @@ class TieredMemory
 
     private function matches(array $doc, string $queryLower, array $terms): bool
     {
-        $searchable = strtolower(PhpSerializer::searchable($doc));
+        $searchable = $this->normalizeSearchText(PhpSerializer::searchable($doc));
         if ($queryLower !== '' && str_contains($searchable, $queryLower)) return true;
         foreach ($terms as $term) {
             if ($term !== '' && str_contains($searchable, $term)) return true;
         }
         return false;
+    }
+
+    private function normalizeSearchText(string $text): string
+    {
+        $text = function_exists('mb_strtolower') ? mb_strtolower($text, 'UTF-8') : strtolower($text);
+        return strtr($text, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ü' => 'u', 'ñ' => 'n',
+        ]);
     }
 
     private function countSerializedLines(string $dir): int
@@ -281,5 +314,16 @@ class TieredMemory
     private function normalizeTier(string $tier): string
     {
         return in_array($tier, ['hot', 'warm', 'cold'], true) ? $tier : 'hot';
+    }
+
+    private function storageKey(string $collection, string $id): string
+    {
+        return $collection . ':' . $id;
+    }
+
+    private function normalizeCollection(string $collection): string
+    {
+        $clean = preg_replace('/[^a-zA-Z0-9_-]/', '_', $collection) ?: 'memories';
+        return trim($clean, '_') !== '' ? $clean : 'memories';
     }
 }

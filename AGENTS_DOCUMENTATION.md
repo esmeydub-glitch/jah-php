@@ -1,52 +1,28 @@
-# JAH MemoryAgent — Qwen Only External Connection
+# JAH Agent Responsibilities
 
-Modo final para hackathon:
+## MemoryActionScript
 
-```text
-PHP puro
-ActionScript PHP JAH
-DataCore con serialización PHP/JAH
-SALK audit en .jahl
-Salida pública text/plain con var_export()
-QwenConnector como única conexión externa especial
-```
+The active product agent classifies input, retrieves relevant memory, bounds context for Qwen, stores reusable knowledge or durable user facts, forgets records and migrates tiers. Generated summaries are stored only after a successful Qwen response and retain their source query.
 
-## Flujo activo
+## DataCore agents
 
-```text
-public/index.php / public/agent.php / public/api.php
-        ↓
-app/actions/MemoryActionScript.php
-        ↓
-src/DataCore/
-        ↓
-app/QwenConnector.php
-        ↓
-Qwen Cloud
-```
+| Agent | Real responsibility |
+|---|---|
+| `StorageAgent` | Binary append/read operations |
+| `IndexAgent` | Persistent record indexes |
+| `LockAgent` | Filesystem concurrency control |
+| `IntegrityAgent` | Stored-data integrity checks |
+| `CompactionAgent` | Rebuild and compaction work |
+| `SnapshotAgent` | Local snapshots |
+| `ReplicationAgent` | Signed, append-only local replicas; no outbound HTTP |
+| `WorkerPool` / `SwooleWorkerPool` | Bounded PHP task execution |
 
-## Reglas
+External HTTP collectors and enrichers are deliberately unavailable in Qwen-only mode. Calling them raises an explicit exception; they never return simulated success.
 
-```text
-No Node
-No npm
-No package runtime
-No acciones internas en formatos externos
-No configuración interna en formatos externos
-No secretos en respuestas públicas
-QWEN_API_KEY solo en header Authorization dentro de QwenConnector
-```
+## ActionScript utilities
 
-## Archivos clave
+- `JasNativeCompiler` validates syntax with PHP's parser and atomically writes PHP artifacts.
+- `JasBinaryCompiler` emits checksummed JAS bytecode and interprets its supported operations.
+- `JasAsyncActions` uses bounded PHP child processes when PCNTL exists and reports its sequential fallback otherwise.
 
-```text
-app/actions/MemoryActionScript.php
-app/actions/SalkSecurityActionScript.php
-app/security/SalkGuard.php
-app/http/JahTransport.php
-app/QwenConnector.php
-src/DataCore/PhpSerializer.php
-public/index.php
-public/agent.php
-public/api.php
-```
+See [`ACTIONSCRIPT_ARCHITECTURE.md`](ACTIONSCRIPT_ARCHITECTURE.md) for the complete product pipeline.

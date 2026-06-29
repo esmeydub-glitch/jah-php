@@ -7,6 +7,7 @@ $config = $boot['config'];
 
 use Jah\Memory\TieredMemory;
 use Jah\Http\JahTransport;
+use Jah\Http\RequestGuard;
 
 header('Content-Type: text/plain; charset=utf-8');
 
@@ -22,12 +23,24 @@ require_once dirname(__DIR__) . '/app/actions/MemoryActionScript.php';
 $runtime = new MemoryActionScript($tiered, $config);
 
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-$input = JahTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
-
-$action = (string)($input['action'] ?? ($method === 'GET' ? 'status' : 'chat'));
-$collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($input['collection'] ?? 'memories')) ?: 'memories';
+$input = [];
+$action = $method === 'GET' ? 'status' : 'chat';
+$collection = 'memories';
 
 try {
+    RequestGuard::assertMethod($method, (array)($config['security']['allowed_methods'] ?? ['GET', 'POST']));
+    RequestGuard::authorize($config);
+    $input = JahTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
+    $action = (string)($input['action'] ?? ($method === 'GET' ? 'status' : 'chat'));
+    if ($action === '' || strlen($action) > (int)($config['security']['max_action_length'] ?? 80) || preg_match('/^[a-z_]+$/', $action) !== 1) {
+        throw new RuntimeException('Acción inválida');
+    }
+    $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($input['collection'] ?? 'memories')) ?: 'memories';
+    $readActions = ['status', 'salk_status', 'salk_package_vectors', 'stats', 'retrieve', 'get', 'search'];
+    if ($method !== 'POST' && !in_array($action, $readActions, true)) {
+        throw new RuntimeException('Esta acción requiere POST');
+    }
+
     switch ($action) {
         case 'status':
             $salkStatus = $runtime->runSalkPreflight('api.status');
@@ -66,7 +79,7 @@ try {
             break;
 
         case 'stats':
-            $stats = $runtime->stats();
+            $stats = $runtime->stats($collection);
             $data = $stats['result'] ?? [];
             $output = [
                 'status' => 'success',
@@ -82,15 +95,17 @@ try {
             if (!is_array($data)) $data = [];
             $id = (string)($data['id'] ?? $input['id'] ?? bin2hex(random_bytes(8)));
             $tier = (string)($input['tier'] ?? $data['_tier'] ?? 'hot');
-            $saved = $runtime->save($id, $data, $tier);
-            $output = ['status' => 'success', 'data' => $saved['result'] ?? ['id' => $id, 'tier' => $tier]];
+            $saved = $runtime->save($id, $data, $tier, $collection);
+            $savedOk = (bool)($saved['success'] ?? false) && (bool)($saved['result']['saved'] ?? false);
+            $output = ['status' => $savedOk ? 'success' : 'rejected', 'data' => $saved['result'] ?? []];
+            if (isset($saved['error'])) $output['error'] = $saved['error'];
             break;
 
         case 'retrieve':
         case 'get':
             $id = trim((string)($input['id'] ?? ''));
             if ($id === '') throw new RuntimeException('id required');
-            $found = $runtime->retrieve($id);
+            $found = $runtime->retrieve($id, $collection);
             $result = $found['result'] ?? [];
             $output = ($result['found'] ?? false)
                 ? ['status' => 'success', 'data' => $result['memory']]
@@ -110,6 +125,7 @@ try {
                 'message' => 'SEARCH PASS: search executed',
                 'query' => $query,
                 'total' => $total,
+                'metrics' => $found['result']['metrics'] ?? [],
                 'data' => $memories,
             ];
             break;
@@ -130,15 +146,20 @@ try {
                 if (!is_array($doc)) continue;
                 $id = (string)($doc['id'] ?? bin2hex(random_bytes(8)));
                 $tier = (string)($doc['_tier'] ?? $input['tier'] ?? 'hot');
-                $runtime->save($id, $doc, $tier);
-                $saved++;
+                $result = $runtime->save($id, $doc, $tier, $collection);
+                if (($result['success'] ?? false) && ($result['result']['saved'] ?? false)) $saved++;
             }
             $output = ['status' => 'success', 'inserted' => $saved];
             break;
 
         case 'migrate':
-            $migrated = $runtime->migrate();
+            $migrated = $runtime->migrate($collection);
             $output = ['status' => 'success', 'data' => $migrated['result'] ?? []];
+            break;
+
+        case 'reindex':
+            $indexed = $runtime->reindex($collection);
+            $output = ['status' => ($indexed['success'] ?? false) ? 'success' : 'error', 'data' => $indexed['result'] ?? []];
             break;
 
         case 'chat':
@@ -147,7 +168,8 @@ try {
             if ($message === '') throw new RuntimeException('message required');
             $model = (string)($input['model'] ?? $config['qwen']['model'] ?? 'qwen-max');
             $agent = $runtime->runAgent($message, $collection, $model);
-            $output = array_merge(['status' => 'success', 'model' => $model], $agent);
+            $agentOk = !($agent['blocked_by_salk'] ?? false) && !($agent['qwen_failed'] ?? false);
+            $output = array_merge(['status' => $agentOk ? 'success' : 'error', 'model' => $model], $agent);
             break;
     }
 } catch (Throwable $e) {

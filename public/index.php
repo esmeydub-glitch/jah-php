@@ -6,6 +6,47 @@ $boot = require dirname(__DIR__) . '/app/bootstrap.php';
 $config = $boot['config'];
 
 use Jah\Memory\TieredMemory;
+use Jah\Http\RequestGuard;
+
+$request = array_merge($_GET, $_POST);
+$requestedAction = (string)($request['action'] ?? 'chat');
+$csrfToken = RequestGuard::csrfToken();
+$loginError = '';
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    try {
+        RequestGuard::assertCsrf((string)($request['csrf_token'] ?? ''));
+    } catch (Throwable $e) {
+        http_response_code(403);
+        echo 'Petición rechazada: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
+        exit;
+    }
+}
+
+if ($requestedAction === 'login' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    if (RequestGuard::loginBrowser((string)($request['access_key'] ?? ''))) {
+        header('Location: index.php');
+        exit;
+    }
+    $loginError = 'Clave de acceso inválida.';
+}
+
+if ($requestedAction === 'logout' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    RequestGuard::logoutBrowser();
+    header('Location: index.php');
+    exit;
+}
+
+if (!RequestGuard::browserIsAuthorized()) {
+    $safeToken = htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8');
+    $safeError = htmlspecialchars($loginError, ENT_QUOTES, 'UTF-8');
+    echo '<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acceso JAH</title></head><body>';
+    echo '<h1>JAH MemoryAgent</h1><p>Introduce JAH_API_KEY para continuar.</p>';
+    if ($safeError !== '') echo '<p>' . $safeError . '</p>';
+    echo '<form method="post"><input type="hidden" name="action" value="login"><input type="hidden" name="csrf_token" value="' . $safeToken . '"><input type="password" name="access_key" required><button type="submit">Entrar</button></form>';
+    echo '</body></html>';
+    exit;
+}
 
 $storagePath = (string)$config['paths']['datacore_storage'];
 $hotStoragePath = (string)$config['paths']['hot_storage'];
@@ -13,13 +54,14 @@ $tiered = new TieredMemory($storagePath, $hotStoragePath);
 require_once dirname(__DIR__) . '/app/actions/MemoryActionScript.php';
 $runtime = new MemoryActionScript($tiered, $config);
 
-$action = $_REQUEST['action'] ?? 'chat';
-$collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($_REQUEST['collection'] ?? 'memories')) ?: 'memories';
-$id = trim((string)($_REQUEST['id'] ?? ''));
-$content = trim((string)($_REQUEST['content'] ?? ''));
-$message = trim((string)($_REQUEST['message'] ?? ''));
-$query = trim((string)($_REQUEST['query'] ?? ''));
-$tier = in_array(($_REQUEST['tier'] ?? 'hot'), ['hot', 'warm', 'cold'], true) ? (string)$_REQUEST['tier'] : 'hot';
+$action = $requestedAction;
+$collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($request['collection'] ?? 'memories')) ?: 'memories';
+$id = trim((string)($request['id'] ?? ''));
+$content = trim((string)($request['content'] ?? ''));
+$message = trim((string)($request['message'] ?? ''));
+$query = trim((string)($request['query'] ?? ''));
+$requestedTier = (string)($request['tier'] ?? 'hot');
+$tier = in_array($requestedTier, ['hot', 'warm', 'cold'], true) ? $requestedTier : 'hot';
 
 $feedback = '';
 $response = '';
@@ -36,9 +78,10 @@ switch ($action) {
     case 'save':
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($id !== '' && $content !== '') {
-                $tags = array_values(array_filter(array_map('trim', explode(',', (string)($_REQUEST['tags'] ?? '')))));
-                $result = $runtime->save($id, ['id' => $id, 'content' => $content, 'tags' => $tags], $tier);
-                $feedback = ($result['success'] ?? false) ? "Guardado en tier [{$tier}]: {$id}" : ('Error: ' . ($result['error'] ?? 'no guardado'));
+                $tags = array_values(array_filter(array_map('trim', explode(',', (string)($request['tags'] ?? '')))));
+                $result = $runtime->save($id, ['id' => $id, 'content' => $content, 'tags' => $tags], $tier, $collection);
+                $saved = (bool)($result['success'] ?? false) && (bool)($result['result']['saved'] ?? false);
+                $feedback = $saved ? "Guardado en tier [{$tier}]: {$id}" : ('Error: ' . ($result['result']['reason'] ?? $result['error'] ?? 'no guardado'));
             } else {
                 $feedback = 'Error: se requieren id y content';
             }
@@ -53,7 +96,7 @@ switch ($action) {
         break;
 
     case 'delete':
-        if ($id !== '') {
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && $id !== '') {
             $result = $runtime->delete($id, $collection);
             $feedback = ($result['success'] ?? false) ? "Olvidado / Forgotten: {$id}" : ('Error: ' . ($result['error'] ?? 'no eliminado'));
             $action = 'search';
@@ -61,13 +104,33 @@ switch ($action) {
         break;
 
     case 'migrate':
-        $result = $runtime->migrate();
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $feedback = 'Error: la migración requiere POST';
+            $action = 'stats';
+            break;
+        }
+        $result = $runtime->migrate($collection);
         $feedback = 'Migración ejecutada: ' . php_dump($result['result'] ?? []);
         $action = 'stats';
-        // no break
+        $result = $runtime->stats($collection);
+        $statsData = $result['result'] ?? [];
+        break;
+
+    case 'reindex':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            $feedback = 'Error: reindex requiere POST';
+            $action = 'stats';
+            break;
+        }
+        $result = $runtime->reindex($collection);
+        $feedback = 'Índice reconstruido: ' . php_dump($result['result'] ?? []);
+        $action = 'stats';
+        $result = $runtime->stats($collection);
+        $statsData = $result['result'] ?? [];
+        break;
 
     case 'stats':
-        $result = $runtime->stats();
+        $result = $runtime->stats($collection);
         $statsData = $result['result'] ?? [];
         break;
 
@@ -119,6 +182,8 @@ function brief(mixed $value, int $length = 220): string {
         .nav { margin-bottom: 20px; }
         .nav a { color: #00ff88; margin: 0 8px 8px 0; display: inline-block; text-decoration: none; padding: 6px 10px; border: 1px solid #00ff88; border-radius: 3px; }
         .nav a:hover, .nav a.active { background: #00ff88; color: #0f0f23; }
+        .inline-form { display: inline; background: none; padding: 0; margin: 0; }
+        .inline-form button { padding: 6px 10px; margin: 0 8px 8px 0; border: 1px solid #00ff88; border-radius: 3px; font-weight: normal; }
         form { background: #1a1a3e; padding: 20px; border-radius: 8px; margin-bottom: 15px; }
         label { display: block; margin: 10px 0 5px; color: #aaa; }
         input, textarea, select { width: 100%; padding: 10px; background: #0f0f23; border: 1px solid #333; color: #e0e0e0; border-radius: 4px; font-family: inherit; }
@@ -153,7 +218,9 @@ function brief(mixed $value, int $length = 220): string {
         <a href="?action=search" class="<?= $action === 'search' ? 'active' : '' ?>">Buscar / Search</a>
         <a href="?action=stats" class="<?= $action === 'stats' ? 'active' : '' ?>">Estadísticas / Stats</a>
         <a href="?action=salk_status" class="<?= $action === 'salk_status' ? 'active' : '' ?>">SALK</a>
-        <a href="?action=migrate">Migrar tiers / Migrate</a>
+        <form method="POST" class="inline-form"><input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>"><input type="hidden" name="action" value="migrate"><button type="submit">Migrar tiers / Migrate</button></form>
+        <form method="POST" class="inline-form"><input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>"><input type="hidden" name="action" value="reindex"><button type="submit">Reconstruir índice / Reindex</button></form>
+        <form method="POST" class="inline-form"><input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>"><input type="hidden" name="action" value="logout"><button type="submit">Salir</button></form>
     </div>
 
     <?php if ($feedback !== ''): ?>
@@ -162,6 +229,7 @@ function brief(mixed $value, int $length = 220): string {
 
     <?php if ($action === 'chat'): ?>
     <form method="POST" action="">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
         <input type="hidden" name="action" value="chat">
         <label>Pregunta / Question:</label>
         <textarea name="message" rows="3" placeholder="Escribe tu mensaje... / Type your message..." required><?= e($message) ?></textarea>
@@ -203,6 +271,7 @@ function brief(mixed $value, int $length = 220): string {
 
     <?php elseif ($action === 'save'): ?>
     <form method="POST" action="">
+        <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
         <input type="hidden" name="action" value="save">
         <label>ID:</label>
         <input type="text" name="id" placeholder="identificador-unico" required>
@@ -247,7 +316,7 @@ function brief(mixed $value, int $length = 220): string {
         <div class="meta">
             <?= e(date('Y-m-d H:i', (int)($item['_ts'] ?? time()))) ?>
             <?php if (isset($item['id'])): ?>
-            | <a href="?action=delete&id=<?= urlencode((string)$item['id']) ?>" class="error">Olvidar / Forget</a>
+            | <form method="POST" class="inline-form"><input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?= e($item['id']) ?>"><button type="submit" class="error">Olvidar / Forget</button></form>
             <?php endif; ?>
         </div>
     </div>

@@ -350,7 +350,7 @@ final class SalkGuard
             'metadata' => $metadata,
             'request' => [
                 'method' => $_SERVER['REQUEST_METHOD'] ?? null,
-                'uri' => $_SERVER['REQUEST_URI'] ?? null,
+                'uri' => $this->sanitizeRequestUri($_SERVER['REQUEST_URI'] ?? null),
                 'ip' => $_SERVER['REMOTE_ADDR'] ?? null,
             ],
         ]);
@@ -372,7 +372,7 @@ final class SalkGuard
             foreach ($value as $key => $item) {
                 $keyString = is_string($key) ? $key : (string)$key;
                 if ($this->isSensitiveKey($keyString) && !is_array($item) && !is_object($item)) {
-                    $masked[$key] = $this->maskText((string)$item);
+                    $masked[$key] = $item === null || $item === '' ? $item : '[SALK_MASKED]';
                 } else {
                     $masked[$key] = $this->maskSecrets($item);
                 }
@@ -424,6 +424,18 @@ final class SalkGuard
         return false;
     }
 
+    public function containsSensitiveData(mixed $value): bool
+    {
+        if (!is_array($value)) return false;
+        foreach ($value as $key => $item) {
+            if ($this->isSensitiveKey((string)$key) && $item !== null && $item !== '' && $item !== []) {
+                return true;
+            }
+            if (is_array($item) && $this->containsSensitiveData($item)) return true;
+        }
+        return false;
+    }
+
     private function getSecret(string $name): string
     {
         $value = $_ENV[$name] ?? getenv($name);
@@ -432,7 +444,7 @@ final class SalkGuard
 
     private function collectKnownSecrets(): void
     {
-        foreach (['QWEN_API_KEY', 'DASHSCOPE_API_KEY', 'OPENAI_API_KEY'] as $key) {
+        foreach (['QWEN_API_KEY', 'DASHSCOPE_API_KEY', 'OPENAI_API_KEY', 'JAH_API_KEY', 'JAH_REPLICATION_KEY'] as $key) {
             $secret = $this->getSecret($key);
             if ($secret !== '') {
                 $this->knownSecrets[$key] = $secret;
@@ -487,13 +499,11 @@ final class SalkGuard
 
     private function isSensitiveKey(string $key): bool
     {
-        $k = strtolower($key);
-        return str_contains($k, 'key')
-            || str_contains($k, 'secret')
-            || str_contains($k, 'token')
-            || str_contains($k, 'authorization')
-            || str_contains($k, 'bearer')
-            || str_contains($k, 'password');
+        $k = strtolower(trim($key));
+        return preg_match(
+            '/(^|[_-])(api[_-]?key|secret|token|authorization|bearer|password|passwd|credential)([_-]|$)/',
+            $k
+        ) === 1;
     }
 
     private function arrayHasSensitiveKey(array $payload, string $needle): bool
@@ -560,5 +570,18 @@ final class SalkGuard
         $full = $this->realOrFallback($path);
         $root = rtrim($this->realOrFallback($this->root), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
         return str_starts_with($full, $root) ? substr($full, strlen($root)) : $full;
+    }
+
+    private function sanitizeRequestUri(mixed $uri): ?string
+    {
+        if (!is_string($uri) || $uri === '') return null;
+        $parts = parse_url($uri);
+        if (!is_array($parts)) return $this->maskText($uri);
+        $path = (string)($parts['path'] ?? '');
+        if (!isset($parts['query'])) return $path;
+
+        parse_str((string)$parts['query'], $query);
+        $query = $this->maskSecrets($query);
+        return $path . ($query !== [] ? '?' . http_build_query($query) : '');
     }
 }

@@ -1,52 +1,36 @@
-# JAH MemoryAgent — Qwen Only External Connection
+# Automated Test Evidence
 
-Modo final para hackathon:
+This report is reproducible; it does not claim browser or cloud deployment checks.
 
-```text
-PHP puro
-ActionScript PHP JAH
-DataCore con serialización PHP/JAH
-SALK audit en .jahl
-Salida pública text/plain con var_export()
-QwenConnector como única conexión externa especial
+## Commands
+
+```bash
+php php_actionscript_php_doc/test_compiler.php
+php php_actionscript_php_doc/tests/run.php
+php tests/run.php
+find app public src php_actionscript_php_doc tests -name '*.php' -print0 | xargs -0 -n1 php -l
 ```
 
-## Flujo activo
+## Covered behavior
+
+- real PHP syntax acceptance and rejection;
+- checksummed JAS bytecode execution and corruption rejection;
+- ActionScript actions, promises, streams, events, types, policy and task execution;
+- generated-summary classification, persistence and retrieval;
+- collection isolation, tier deduplication, migration and forgetting;
+- DataCore pointer/index correctness, rebuilding and metrics;
+- access-key, CSRF and sensitive-field protections;
+- signed local replication, tamper detection and replica recovery.
+
+The latest observed totals and date are recorded only after executing these commands. Cloud evidence and the single public demo-video link remain separate in [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md).
+
+## Latest local run
+
+Run on 2026-06-28:
 
 ```text
-public/index.php / public/agent.php / public/api.php
-        ↓
-app/actions/MemoryActionScript.php
-        ↓
-src/DataCore/
-        ↓
-app/QwenConnector.php
-        ↓
-Qwen Cloud
-```
-
-## Reglas
-
-```text
-No Node
-No npm
-No package runtime
-No acciones internas en formatos externos
-No configuración interna en formatos externos
-No secretos en respuestas públicas
-QWEN_API_KEY solo en header Authorization dentro de QwenConnector
-```
-
-## Archivos clave
-
-```text
-app/actions/MemoryActionScript.php
-app/actions/SalkSecurityActionScript.php
-app/security/SalkGuard.php
-app/http/JahTransport.php
-app/QwenConnector.php
-src/DataCore/PhpSerializer.php
-public/index.php
-public/agent.php
-public/api.php
+JAS compiler and bytecode: 7/7 PASS
+ActionScript runtime: 7/7 PASS
+MemoryAgent product: 17/17 PASS
+PHP lint: PASS for every PHP file under app, public, src, php_actionscript_php_doc and tests
 ```

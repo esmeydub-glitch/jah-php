@@ -20,12 +20,14 @@ final class TransactionAgent
 
     public function begin(string $txId): void
     {
+        $txId = $this->safeId($txId);
         $journal = $this->basePath . "/pending/{$txId}.journal";
         file_put_contents($journal, PhpSerializer::encode(['status' => 'started', 'ts' => time()]));
     }
 
     public function commit(string $txId): bool
     {
+        $txId = $this->safeId($txId);
         $pending = $this->basePath . "/pending/{$txId}.journal";
         $committed = $this->basePath . "/committed/{$txId}.journal";
         if (!file_exists($pending)) {
@@ -37,10 +39,16 @@ final class TransactionAgent
 
     public function rollback(string $txId): void
     {
+        $txId = $this->safeId($txId);
         $pending = $this->basePath . "/pending/{$txId}.journal";
         $rollback = $this->basePath . "/rollback/{$txId}.journal";
         if (file_exists($pending)) {
             rename($pending, $rollback);
         }
+    }
+
+    private function safeId(string $txId): string
+    {
+        return hash('sha256', $txId);
     }
 }

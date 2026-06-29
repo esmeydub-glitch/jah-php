@@ -24,12 +24,22 @@ final class JahTransport
     public static function decodeRequest(int $maxBytes = 1048576): array
     {
         $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+        $contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+        if ($contentLength > $maxBytes) {
+            throw new RuntimeException('JAH payload exceeds maximum allowed size');
+        }
 
         if ($method !== 'POST') {
+            if (strlen((string)($_SERVER['QUERY_STRING'] ?? '')) > $maxBytes) {
+                throw new RuntimeException('JAH query exceeds maximum allowed size');
+            }
             return $_GET;
         }
 
         if ($_POST !== []) {
+            if (strlen(http_build_query($_POST)) > $maxBytes) {
+                throw new RuntimeException('JAH payload exceeds maximum allowed size');
+            }
             return $_POST;
         }
 
@@ -62,9 +72,11 @@ final class JahTransport
         return implode("\n", $lines) . "\n";
     }
 
-    public static function respond(array $payload, ?SalkGuard $salk = null, int $status = 200): void
+    public static function respond(array $payload, ?SalkGuard $salk = null, ?int $status = null): void
     {
-        http_response_code($status);
+        if ($status !== null) {
+            http_response_code($status);
+        }
         header('Content-Type: text/plain; charset=utf-8');
         echo self::encodePublic($payload, $salk);
     }
@@ -101,6 +113,10 @@ final class JahTransport
             return 'null';
         }
 
-        return (string)$value;
+        return str_replace(
+            ["\\", "\r", "\n"],
+            ["\\\\", '\\r', '\\n'],
+            (string)$value
+        );
     }
 }

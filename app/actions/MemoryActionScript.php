@@ -38,6 +38,28 @@ final class MemoryActionScript
             'context' => 'memoryagent.run',
         ]);
         $trace[] = $this->traceFromResult($salkPreflight);
+        $preflightOk = (bool)($salkPreflight['success'] ?? false)
+            && (bool)($salkPreflight['result']['ok'] ?? false);
+        if (!$preflightOk) {
+            $audit = $this->run('salk.audit_event', [
+                'event' => 'memoryagent.blocked',
+                'result' => ['status' => false, 'ok' => false],
+                'metadata' => ['reason' => 'salk_preflight_failed'],
+            ]);
+            $trace[] = $this->traceFromResult($audit);
+            $this->lastTrace = $this->salk->maskSecrets($trace);
+            return $this->salk->maskSecrets([
+                'response' => 'SALK bloqueó la ejecución porque el preflight de seguridad falló.',
+                'blocked_by_salk' => true,
+                'context_used' => 0,
+                'context_preview' => '',
+                'memories' => [],
+                'classification' => [],
+                'stored' => ['stored' => false, 'reason' => 'salk_preflight_failed'],
+                'actions_trace' => $trace,
+                'salk' => ['preflight' => $salkPreflight['result'] ?? [], 'audit' => $audit['result'] ?? []],
+            ]);
+        }
 
         $classification = $this->run('memory.classify_input', [
             'message' => $message,
@@ -64,6 +86,32 @@ final class MemoryActionScript
             'model' => $model,
         ]);
         $trace[] = $this->traceFromResult($answer);
+
+        $answerBlocked = (bool)($answer['result']['blocked_by_salk'] ?? false);
+        if (($answer['success'] ?? false) !== true || $answerBlocked) {
+            $audit = $this->run('salk.audit_event', [
+                'event' => $answerBlocked ? 'memoryagent.blocked' : 'memoryagent.qwen_failed',
+                'result' => ['status' => false, 'ok' => false],
+                'metadata' => ['collection' => $collection],
+            ]);
+            $trace[] = $this->traceFromResult($audit);
+            $this->lastTrace = $this->salk->maskSecrets($trace);
+            return $this->salk->maskSecrets([
+                'response' => $answerBlocked
+                    ? (string)($answer['result']['response'] ?? 'SALK bloqueó la solicitud.')
+                    : ($answer['error'] ?? 'Qwen no pudo completar la solicitud.'),
+                'blocked_by_salk' => $answerBlocked,
+                'qwen_failed' => !$answerBlocked,
+                'context_used' => count($retrieved['result']['memories'] ?? []),
+                'context_preview' => $context['result']['context'] ?? '',
+                'memories' => $retrieved['result']['memories'] ?? [],
+                'memory_search' => $retrieved['result']['metrics'] ?? [],
+                'classification' => $classification['result'] ?? [],
+                'stored' => ['stored' => false, 'reason' => $answerBlocked ? 'secret_detected_not_sent' : 'qwen_failed'],
+                'actions_trace' => $trace,
+                'salk' => ['preflight' => $salkPreflight['result'] ?? [], 'audit' => $audit['result'] ?? []],
+            ]);
+        }
 
         $store = $this->run('memory.store_interaction', [
             'message' => $message,
@@ -92,6 +140,7 @@ final class MemoryActionScript
             'context_used' => count($retrieved['result']['memories'] ?? []),
             'context_preview' => $context['result']['context'] ?? '',
             'memories' => $retrieved['result']['memories'] ?? [],
+            'memory_search' => $retrieved['result']['metrics'] ?? [],
             'classification' => $classification['result'] ?? [],
             'stored' => $store['result'] ?? [],
             'actions_trace' => $trace,
@@ -102,9 +151,9 @@ final class MemoryActionScript
         ]);
     }
 
-    public function save(string $id, array $content, string $tier = 'hot'): array
+    public function save(string $id, array $content, string $tier = 'hot', string $collection = 'memories'): array
     {
-        return $this->run('memory.save', ['id' => $id, 'content' => $content, 'tier' => $tier]);
+        return $this->run('memory.save', ['id' => $id, 'content' => $content, 'tier' => $tier, 'collection' => $collection]);
     }
 
     public function search(string $query, string $collection = 'memories', int $limit = 20): array
@@ -112,9 +161,9 @@ final class MemoryActionScript
         return $this->run('memory.search_context', ['query' => $query, 'collection' => $collection, 'limit' => $limit]);
     }
 
-    public function retrieve(string $id): array
+    public function retrieve(string $id, string $collection = 'memories'): array
     {
-        return $this->run('memory.retrieve', ['id' => $id]);
+        return $this->run('memory.retrieve', ['id' => $id, 'collection' => $collection]);
     }
 
     public function delete(string $id, string $collection = 'memories'): array
@@ -122,14 +171,19 @@ final class MemoryActionScript
         return $this->run('memory.forget', ['id' => $id, 'collection' => $collection]);
     }
 
-    public function stats(): array
+    public function stats(string $collection = 'memories'): array
     {
-        return $this->run('memory.stats', []);
+        return $this->run('memory.stats', ['collection' => $collection]);
     }
 
-    public function migrate(): array
+    public function migrate(string $collection = 'memories'): array
     {
-        return $this->run('memory.migrate', []);
+        return $this->run('memory.migrate', ['collection' => $collection]);
+    }
+
+    public function reindex(string $collection = 'memories'): array
+    {
+        return $this->run('memory.reindex', ['collection' => $collection]);
     }
 
     public function getLastTrace(): array
@@ -178,7 +232,11 @@ final class MemoryActionScript
                 $limit = max(1, min((int)($data['limit'] ?? 10), 50));
                 $memories = $this->memory->search($query, $collection, $limit);
                 $memories = is_array($memories) ? $this->salk->maskSecrets($memories) : [];
-                return ['memories' => $memories, 'count' => count($memories)];
+                return [
+                    'memories' => $memories,
+                    'count' => count($memories),
+                    'metrics' => $this->memory->getLastSearchMetrics(),
+                ];
             });
 
         ActionScript::define('memory.build_context')
@@ -221,6 +279,9 @@ final class MemoryActionScript
             ->handler(function (array $data): array {
                 $apiKey = (string)($_ENV['QWEN_API_KEY'] ?? getenv('QWEN_API_KEY') ?: '');
                 $model = (string)($data['model'] ?? $this->config['qwen']['model'] ?? getenv('QWEN_MODEL') ?: 'qwen-max');
+                if (strlen($model) > 100 || preg_match('/^[a-zA-Z0-9_.-]+$/', $model) !== 1) {
+                    throw new InvalidArgumentException('Modelo Qwen inválido');
+                }
                 $baseUrl = (string)($this->config['qwen']['base_url'] ?? getenv('QWEN_BASE_URL') ?: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1');
                 $message = (string)$data['message'];
                 $context = $this->salk->maskText((string)$data['context']);
@@ -237,6 +298,7 @@ final class MemoryActionScript
             ->timeout(3000)
             ->handler(function (array $data): array {
                 $message = (string)$data['message'];
+                $response = (string)$data['response'];
                 $classification = is_array($data['classification'] ?? null)
                     ? $data['classification']
                     : $this->classifyInput($message);
@@ -260,21 +322,53 @@ final class MemoryActionScript
                     ];
                 }
 
+                $storeResponse = (bool)($classification['store_response'] ?? false);
+                if ($storeResponse && trim($response) === '') {
+                    return [
+                        'stored' => false,
+                        'reason' => 'generated_knowledge_response_empty',
+                        'type' => (string)($classification['type'] ?? 'knowledge'),
+                        'tier' => null,
+                    ];
+                }
+                if ($storeResponse && $this->salk->containsSecret($response)) {
+                    $this->salk->auditEvent('salk.secret_response_memory_blocked', ['ok' => true], ['type' => 'memory.store_interaction']);
+                    return [
+                        'stored' => false,
+                        'reason' => 'secret_detected_in_response_not_stored',
+                        'type' => 'secret_blocked',
+                        'tier' => null,
+                    ];
+                }
+
                 $now = time();
-                $uid = 'memory_' . bin2hex(random_bytes(6));
+                $uid = $storeResponse
+                    ? 'knowledge_' . substr(hash('sha256', $this->normalizeText($message)), 0, 20)
+                    : 'memory_' . bin2hex(random_bytes(6));
+                $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
+                $memoryContent = $storeResponse ? $response : $message;
                 $this->memory->store($uid, [
-                    'role' => 'user',
-                    'content' => $this->salk->maskText($message),
-                    'tags' => ['memory', (string)$classification['type'], 'classified'],
+                    'role' => $storeResponse ? 'memory' : 'user',
+                    'content' => $this->salk->maskText($memoryContent),
+                    'source_query' => $storeResponse ? $this->salk->maskText($message) : null,
+                    'tags' => array_values(array_filter([
+                        'memory',
+                        (string)$classification['type'],
+                        'classified',
+                        $storeResponse ? 'qwen_generated_knowledge' : null,
+                    ])),
                     'importance' => (int)($classification['importance'] ?? 5),
                     'classification_reason' => (string)($classification['reason'] ?? 'stored'),
                     '_ts' => $now,
-                ], 'hot');
+                ], 'hot', $collection);
 
                 return [
                     'stored' => true,
-                    'user_id' => $uid,
-                    'assistant_stored' => false,
+                    'memory_id' => $uid,
+                    'user_id' => $storeResponse ? null : $uid,
+                    'assistant_id' => $storeResponse ? $uid : null,
+                    'assistant_stored' => $storeResponse,
+                    'stored_source' => $storeResponse ? 'qwen_response' : 'user_input',
                     'type' => (string)$classification['type'],
                     'importance' => (int)($classification['importance'] ?? 5),
                     'tier' => 'hot',
@@ -285,23 +379,26 @@ final class MemoryActionScript
             ->requires(['id', 'content'])
             ->timeout(3000)
             ->handler(function (array $data): array {
-                $tier = (string)($data['tier'] ?? 'hot');
+                $requestedTier = (string)($data['tier'] ?? 'hot');
+                $tier = in_array($requestedTier, ['hot', 'warm', 'cold'], true) ? $requestedTier : 'hot';
+                $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
                 $content = is_array($data['content']) ? $data['content'] : ['content' => (string)$data['content']];
                 $serialized = var_export($content, true);
-                if ($this->salk->containsSecret($serialized)) {
+                if ($this->salk->containsSecret($serialized) || $this->salk->containsSensitiveData($content)) {
                     $this->salk->auditEvent('salk.secret_save_blocked', ['ok' => true], ['id' => (string)$data['id']]);
                     return ['id' => (string)$data['id'], 'tier' => $tier, 'saved' => false, 'reason' => 'secret_detected_not_stored'];
                 }
                 $content = $this->salk->maskSecrets($content);
-                $this->memory->store((string)$data['id'], $content, $tier);
-                return ['id' => (string)$data['id'], 'tier' => $tier, 'saved' => true];
+                $this->memory->store((string)$data['id'], $content, $tier, $collection);
+                return ['id' => (string)$data['id'], 'tier' => $tier, 'collection' => $collection, 'saved' => true];
             });
 
         ActionScript::define('memory.retrieve')
             ->requires(['id'])
             ->timeout(3000)
             ->handler(function (array $data): array {
-                $memory = $this->memory->retrieve((string)$data['id']);
+                $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
+                $memory = $this->memory->retrieve((string)$data['id'], null, $collection);
                 $memory = $memory !== null ? $this->salk->maskSecrets($memory) : null;
                 return ['id' => (string)$data['id'], 'memory' => $memory, 'found' => $memory !== null];
             });
@@ -317,11 +414,24 @@ final class MemoryActionScript
 
         ActionScript::define('memory.migrate')
             ->timeout(10000)
-            ->handler(fn(array $data): array => $this->memory->migrate('memories'));
+            ->handler(function (array $data): array {
+                $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
+                return $this->memory->migrate($collection);
+            });
 
         ActionScript::define('memory.stats')
             ->timeout(3000)
-            ->handler(fn(array $data): array => $this->memory->stats());
+            ->handler(function (array $data): array {
+                $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
+                return $this->memory->stats($collection);
+            });
+
+        ActionScript::define('memory.reindex')
+            ->timeout(30000)
+            ->handler(function (array $data): array {
+                $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($data['collection'] ?? 'memories')) ?: 'memories';
+                return $this->memory->rebuildIndexes($collection);
+            });
     }
 
     private function run(string $action, array $data): array
@@ -340,6 +450,8 @@ final class MemoryActionScript
             'action' => $action,
             'success' => (bool)($result['success'] ?? false),
             'duration_ms' => isset($result['duration_ms']) ? round((float)$result['duration_ms'], 3) : null,
+            'budget_exceeded' => (bool)($result['budget_exceeded'] ?? false),
+            'warning' => $result['warning'] ?? null,
             'error' => $result['error'] ?? null,
             'decision' => $decision,
         ]);
@@ -366,7 +478,7 @@ final class MemoryActionScript
         ];
 
         foreach ($noise as $phrase) {
-            if ($normalized === $phrase || (strlen($normalized) <= 35 && str_contains($normalized, $phrase))) {
+            if ($normalized === $phrase || (strlen($normalized) <= 35 && $this->containsWholePhrase($normalized, $phrase))) {
                 return [
                     'store' => false,
                     'type' => 'noise',
@@ -382,6 +494,19 @@ final class MemoryActionScript
                 'type' => 'forget_request',
                 'importance' => 8,
                 'reason' => 'forget_requests_are_commands_not_memories',
+            ];
+        }
+
+        if ($this->containsAny($normalized, [
+            'resumen', 'resumeme', 'resume el', 'resume la', 'haz un resumen',
+            'sinopsis', 'de que trata', 'summary', 'summarize'
+        ])) {
+            return [
+                'store' => true,
+                'store_response' => true,
+                'type' => 'knowledge_summary',
+                'importance' => 6,
+                'reason' => 'reusable_generated_knowledge',
             ];
         }
 
@@ -448,6 +573,11 @@ final class MemoryActionScript
             }
         }
         return false;
+    }
+
+    private function containsWholePhrase(string $text, string $phrase): bool
+    {
+        return preg_match('/(?:^|\s)' . preg_quote($phrase, '/') . '(?:$|\s)/u', $text) === 1;
     }
 
     private function looksLikeQuestionOnly(string $text): bool

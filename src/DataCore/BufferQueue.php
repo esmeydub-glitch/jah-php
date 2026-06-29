@@ -74,6 +74,7 @@ final class BufferQueue
         $this->writes = [];
         $this->indexEntries = [];
         $this->byteCount = 0;
+        $this->lineCount = 0;
         $this->segment++;
     }
 
@@ -94,10 +95,12 @@ final class DataCoreUltra
 {
     private string $basePath;
     private array $queues = [];
+    private int $flushBytes;
 
     public function __construct(string $basePath, int $flushBytes = 1048576)
     {
         $this->basePath = $basePath;
+        $this->flushBytes = max(1, $flushBytes);
         $this->initDirs();
     }
 
@@ -118,7 +121,7 @@ final class DataCoreUltra
     public function getQueue(string $collection): BufferQueue
     {
         if (!isset($this->queues[$collection])) {
-            $this->queues[$collection] = new BufferQueue($this->basePath, $collection);
+            $this->queues[$collection] = new BufferQueue($this->basePath, $collection, $this->flushBytes);
         }
         return $this->queues[$collection];
     }

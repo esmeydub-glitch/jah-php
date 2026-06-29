@@ -16,6 +16,7 @@ final class SchemaAgent
 
     public function define(string $name): self
     {
+        $name = preg_replace('/[^a-zA-Z0-9_-]/', '_', $name) ?: 'default';
         $this->collection = $name;
         $this->ensureCollection($name);
         return $this;

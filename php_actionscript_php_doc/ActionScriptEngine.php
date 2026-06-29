@@ -92,11 +92,14 @@ class ActionScript
             $result = $fiber->getReturn();
             $durationMs = (hrtime(true) - $startedAt) / 1_000_000;
             if ($durationMs > $this->timeoutMs) {
-                return $this->failure(
-                    "La acción excedió su presupuesto de {$this->timeoutMs} ms",
-                    $durationMs,
-                    'time_budget_exceeded'
-                );
+                return [
+                    'success' => true,
+                    'result' => $result,
+                    'action' => $this->name,
+                    'duration_ms' => $durationMs,
+                    'budget_exceeded' => true,
+                    'warning' => "La acción terminó después de su presupuesto de {$this->timeoutMs} ms",
+                ];
             }
             return [
                 'success' => true,

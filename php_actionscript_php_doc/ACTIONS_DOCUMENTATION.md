@@ -1,5 +1,8 @@
 # Actions Documentation
 
+La lista de acciones oficiales, el pipeline de MemoryAgent y la semántica de
+presupuestos están en [`../ACTIONSCRIPT_ARCHITECTURE.md`](../ACTIONSCRIPT_ARCHITECTURE.md).
+
 ## Acción Asíncrona
 
 ```php

@@ -16,6 +16,7 @@ final class EventAgent
 
     public function emit(string $type, string $collection, array $payload): void
     {
+        $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', $collection) ?: 'default';
         $event = [
             'id' => bin2hex(random_bytes(12)),
             'type' => $type,

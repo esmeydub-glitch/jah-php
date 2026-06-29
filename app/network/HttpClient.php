@@ -158,6 +158,9 @@ class HttpClient
         }
 
         $scheme = strtolower((string) $parts['scheme']);
-        return in_array($scheme, ['http', 'https'], true);
+        if (!in_array($scheme, ['http', 'https'], true)) return false;
+        $qwenBase = (string)($_ENV['QWEN_BASE_URL'] ?? getenv('QWEN_BASE_URL') ?: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1');
+        $qwenHost = parse_url($qwenBase, PHP_URL_HOST);
+        return is_string($qwenHost) && strcasecmp((string)$parts['host'], $qwenHost) === 0;
     }
 }

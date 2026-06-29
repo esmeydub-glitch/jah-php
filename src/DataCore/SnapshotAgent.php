@@ -18,8 +18,10 @@ final class SnapshotAgent
 
     public function create(string $collection, StorageAgent $storage): string
     {
+        $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', $collection) ?: 'default';
         $snapshot = [];
         $results = $storage->query($collection, fn($d) => true);
+        $snapshot['collection'] = $collection;
         $snapshot['records'] = $results;
         $snapshot['created_at'] = time();
 
@@ -36,8 +38,9 @@ final class SnapshotAgent
         }
 
         $snapshot = PhpSerializer::decode(file_get_contents($snapshotFile), true);
+        $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', (string)($snapshot['collection'] ?? 'restored')) ?: 'restored';
         foreach ($snapshot['records'] ?? [] as $record) {
-            $storage->insert('restored_' . time(), $record);
+            $storage->insert($collection, $record);
         }
 
         return true;
@@ -45,6 +48,7 @@ final class SnapshotAgent
 
     public function listSnapshots(string $collection): array
     {
+        $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', $collection) ?: 'default';
         return glob($this->basePath . "/{$collection}_*.jahp") ?: [];
     }
 }

@@ -50,13 +50,13 @@ final class MemoryPyramid
         return $val;
     }
 
-    public function set(string $key, mixed $value, int $ttl = 0): void
+    public function set(string $key, mixed $value, int $ttl = 0, string $tier = 'hot'): void
     {
         $this->hotCache->set($key, $value);
-        $this->warmCache->set($key, $value);
-
-        if ($ttl > 0) {
-            $this->coldStorage->schedule($key, $value, time() + $ttl);
+        if ($tier === 'warm') {
+            $this->warmCache->set($key, $value);
+        } elseif ($tier === 'cold') {
+            $this->coldStorage->set($key, $value);
         }
     }
 
@@ -115,17 +115,40 @@ class WarmMemory
     public function set(string $key, mixed $value): void
     {
         $file = $this->path . '/warm_' . date('Ymd') . '.jahl';
-        $offset = is_file($file) ? (int)filesize($file) : 0;
         $record = PhpSerializer::encode(['key' => $key, 'payload' => $value]);
-        if ($record === false) {
-            return;
+        $handle = fopen($file, 'c+b');
+        if ($handle === false) {
+            throw new \RuntimeException("Cannot open warm memory file: {$file}");
         }
 
-        file_put_contents($file, $record . "\n", FILE_APPEND | LOCK_EX);
+        try {
+            if (!flock($handle, LOCK_EX)) {
+                throw new \RuntimeException("Cannot lock warm memory file: {$file}");
+            }
+            fseek($handle, 0, SEEK_END);
+            $offset = ftell($handle);
+            if ($offset === false) {
+                throw new \RuntimeException("Cannot write warm memory file: {$file}");
+            }
+            $data = $record . "\n";
+            $written = 0;
+            while ($written < strlen($data)) {
+                $bytes = fwrite($handle, substr($data, $written));
+                if ($bytes === false || $bytes === 0) throw new \RuntimeException("Cannot write warm memory file: {$file}");
+                $written += $bytes;
+            }
+            if (!fflush($handle)) throw new \RuntimeException("Cannot flush warm memory file: {$file}");
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
 
         $this->index[$key] = [$file, $offset];
         $encodedFile = str_replace(':', '%3A', $file);
-        file_put_contents($this->path . '/.index', "{$key}:{$encodedFile}:{$offset}\n", FILE_APPEND | LOCK_EX);
+        $encodedKey = rawurlencode($key);
+        if (file_put_contents($this->path . '/.index', "{$encodedKey}:{$encodedFile}:{$offset}\n", FILE_APPEND | LOCK_EX) === false) {
+            throw new \RuntimeException('Cannot update warm memory index');
+        }
     }
 
     private function buildIndex(): array
@@ -142,7 +165,7 @@ class WarmMemory
         foreach (file($indexFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
             $parts = explode(':', $line);
             if (count($parts) >= 3) {
-                $key = array_shift($parts);
+                $key = rawurldecode((string)array_shift($parts));
                 $offset = (int)array_pop($parts);
                 $file = str_replace('%3A', ':', implode(':', $parts));
                 $this->index[$key] = [$file, $offset];
@@ -176,7 +199,9 @@ class ColdMemory
 
     public function get(string $key): mixed
     {
-        foreach (glob($this->path . '/*.jahp.gz') ?: [] as $file) {
+        $files = glob($this->path . '/*.jahp.gz') ?: [];
+        rsort($files, SORT_STRING);
+        foreach ($files as $file) {
             $tmp = tempnam(sys_get_temp_dir(), 'jah_cold_');
             if ($tmp === false) {
                 continue;
@@ -200,6 +225,15 @@ class ColdMemory
 
         if (count($this->queue) > 5000) {
             $this->flush();
+        }
+    }
+
+    public function set(string $key, mixed $value): void
+    {
+        $payload = PhpSerializer::encode([$key => $value]);
+        $file = $this->path . '/cold_' . hash('sha256', $key) . '_' . time() . '_' . bin2hex(random_bytes(3)) . '.jahp.gz';
+        if (file_put_contents($file, Compressor::compress($payload, 'gzip'), LOCK_EX) === false) {
+            throw new \RuntimeException("Cannot write cold memory file: {$file}");
         }
     }
 

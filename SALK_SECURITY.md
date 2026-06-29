@@ -1,52 +1,26 @@
-# JAH MemoryAgent — Qwen Only External Connection
+# SALK Security Model
 
-Modo final para hackathon:
+SALK is JAH's PHP security gate and append-only audit layer.
 
-```text
-PHP puro
-ActionScript PHP JAH
-DataCore con serialización PHP/JAH
-SALK audit en .jahl
-Salida pública text/plain con var_export()
-QwenConnector como única conexión externa especial
-```
+## Controls
 
-## Flujo activo
+| Control | Behavior |
+|---|---|
+| Environment check | Rejects a public `.env` and warns about unsafe permissions |
+| Key protection | Reports only presence, source and a one-way fingerprint |
+| Storage paths | Keeps memory and audit data outside `public/` |
+| Secret scan | Detects likely hardcoded credentials in runtime source |
+| Runtime boundary | Detects package ecosystems forbidden by pure-PHP mode |
+| Public payload validation | Blocks sensitive fields before output or persistence |
+| Audit | Appends masked `JAHPS1` events to `.jahl` storage |
+| Request guard | Enforces access keys remotely and CSRF tokens for forms |
 
-```text
-public/index.php / public/agent.php / public/api.php
-        ↓
-app/actions/MemoryActionScript.php
-        ↓
-src/DataCore/
-        ↓
-app/QwenConnector.php
-        ↓
-Qwen Cloud
-```
+## ActionScript security actions
 
-## Reglas
+`SalkSecurityActionScript` registers preflight, environment, key, path, package-vector, permission, payload, masking and audit actions. A failed security preflight stops the chat workflow before Qwen is called.
 
-```text
-No Node
-No npm
-No package runtime
-No acciones internas en formatos externos
-No configuración interna en formatos externos
-No secretos en respuestas públicas
-QWEN_API_KEY solo en header Authorization dentro de QwenConnector
-```
+## Trust boundary
 
-## Archivos clave
+Qwen credentials are read from the environment and added only to the outbound authorization header inside `QwenConnector`. They must never appear in memory documents, audit metadata, public responses, screenshots or recordings.
 
-```text
-app/actions/MemoryActionScript.php
-app/actions/SalkSecurityActionScript.php
-app/security/SalkGuard.php
-app/http/JahTransport.php
-app/QwenConnector.php
-src/DataCore/PhpSerializer.php
-public/index.php
-public/agent.php
-public/api.php
-```
+Run `php tests/run.php` to exercise request authorization, CSRF enforcement and sensitive-field rejection alongside the memory tests.

@@ -59,7 +59,13 @@ final class WALTransactionCore
             throw new RuntimeException("Unsupported WAL operation: {$op}");
         }
 
+        $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', $collection) ?: 'default';
+
         $doc['id'] ??= bin2hex(random_bytes(16));
+        $doc['id'] = (string)$doc['id'];
+        if ($doc['id'] === '' || strlen($doc['id']) > 255 || preg_match('/[\x00-\x1F\x7F]/', $doc['id']) === 1) {
+            throw new RuntimeException('Invalid WAL document id');
+        }
         if ($op === 'delete') {
             $doc['_deleted'] = true;
         }

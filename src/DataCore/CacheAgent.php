@@ -12,7 +12,7 @@ final class CacheAgent
 
     public function __construct(int $limit = 10000)
     {
-        $this->limit = $limit;
+        $this->limit = max(1, $limit);
     }
 
     public function get(string $key): mixed
@@ -26,7 +26,9 @@ final class CacheAgent
 
     public function set(string $key, mixed $value): void
     {
-        if (count($this->hot) >= $this->limit) {
+        if (array_key_exists($key, $this->hot)) {
+            $this->order = array_values(array_diff($this->order, [$key]));
+        } elseif (count($this->hot) >= $this->limit) {
             $old = array_shift($this->order);
             unset($this->hot[$old]);
         }

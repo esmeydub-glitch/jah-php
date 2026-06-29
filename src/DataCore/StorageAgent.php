@@ -15,41 +15,51 @@ final class StorageAgent
 
     public function __construct(string $basePath)
     {
-        $this->basePath = $basePath;
+        $this->basePath = rtrim($basePath, '/');
+        if (!is_dir($this->basePath) && !mkdir($this->basePath, 0700, true) && !is_dir($this->basePath)) {
+            throw new \RuntimeException("Cannot create storage directory: {$this->basePath}");
+        }
     }
 
     public function insert(string $collection, array $doc): string
     {
-        $id = $doc['id'] ?? bin2hex(random_bytes(16));
-        if (!isset($doc['id'])) {
-            $doc['id'] = $id;
-            $doc['_ts'] = time();
-        }
+        $collection = $this->sanitizeCollection($collection);
+        $id = (string)($doc['id'] ?? bin2hex(random_bytes(16)));
+        $this->assertValidId($id);
+        $doc['id'] = $id;
+        $doc['_ts'] ??= time();
 
         $segment = $this->getSegment($collection, $id);
-        $lineOffset = $this->getLineOffset($collection, $segment);
-
+        $payloadHash = hash('sha256', PhpSerializer::encode($doc));
         $record = PhpSerializer::encode([
             'id' => $id,
             'collection' => $collection,
             'payload' => $doc,
             'ts' => $doc['_ts'] ?? time(),
+            'hash' => $payloadHash,
         ]) . "\n";
 
-        $bytes = file_put_contents(
-            $this->basePath . "/{$collection}_{$segment}.jahl",
-            $record,
-            FILE_APPEND
-        );
-
-        // Índice simple: id => archivo:linea
-        $this->indexRecord($collection, $id, $segment, $lineOffset);
+        $file = $this->basePath . "/{$collection}_{$segment}.jahl";
+        $handle = fopen($file, 'c+b');
+        if ($handle === false) throw new \RuntimeException("Cannot open storage file: {$file}");
+        try {
+            if (!flock($handle, LOCK_EX)) throw new \RuntimeException("Cannot lock storage file: {$file}");
+            $lineOffset = $this->countLines($handle);
+            fseek($handle, 0, SEEK_END);
+            $this->writeAll($handle, $record, $file);
+            if (!fflush($handle)) throw new \RuntimeException("Cannot flush storage file: {$file}");
+            $this->indexRecord($collection, $id, $segment, $lineOffset);
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
+        }
 
         return $id;
     }
 
     public function find(string $collection, string $id): ?array
     {
+        $collection = $this->sanitizeCollection($collection);
         $idx = $this->loadIndex($collection);
         if (!isset($idx[$id])) {
             return null;
@@ -75,6 +85,7 @@ final class StorageAgent
 
     public function query(string $collection, callable $filter): array
     {
+        $collection = $this->sanitizeCollection($collection);
         $latest = [];
         foreach (glob($this->basePath . "/{$collection}_*.jahl") as $file) {
             foreach (file($file) as $line) {
@@ -122,16 +133,10 @@ final class StorageAgent
         return (int) ((crc32($id) % 1000000) / $this->segmentSize);
     }
 
-    private function getLineOffset(string $collection, int $segment): int
-    {
-        $file = $this->basePath . "/{$collection}_{$segment}.jahl";
-        return file_exists($file) ? count(file($file)) : 0;
-    }
-
     private function indexRecord(string $collection, string $id, int $segment, int $line): void
     {
         $indexFile = $this->basePath . "/{$collection}.idx";
-        file_put_contents($indexFile, "{$id}:{$segment}:{$line}\n", FILE_APPEND);
+        file_put_contents($indexFile, rawurlencode($id) . ":{$segment}:{$line}\n", FILE_APPEND | LOCK_EX);
         $this->indexes[$collection][$id] = [$segment, $line];
     }
 
@@ -147,7 +152,7 @@ final class StorageAgent
             foreach (file($file) as $line) {
                 $parts = explode(':', trim($line));
                 if (count($parts) === 3) {
-                    $idx[$parts[0]] = [(int) $parts[1], (int) $parts[2]];
+                    $idx[rawurldecode($parts[0])] = [(int) $parts[1], (int) $parts[2]];
                 }
             }
         }
@@ -168,5 +173,39 @@ final class StorageAgent
     public function close(): void
     {
         $this->indexes = [];
+    }
+
+    private function sanitizeCollection(string $collection): string
+    {
+        $clean = preg_replace('/[^a-zA-Z0-9_-]/', '_', $collection) ?: 'memories';
+        return trim($clean, '_') !== '' ? $clean : 'memories';
+    }
+
+    private function assertValidId(string $id): void
+    {
+        if ($id === '' || strlen($id) > 255 || preg_match('/[\x00-\x1F\x7F]/', $id) === 1) {
+            throw new \InvalidArgumentException('Storage id must contain 1-255 printable bytes');
+        }
+    }
+
+    private function countLines($handle): int
+    {
+        rewind($handle);
+        $lines = 0;
+        while (fgets($handle) !== false) $lines++;
+        return $lines;
+    }
+
+    private function writeAll($handle, string $record, string $file): void
+    {
+        $offset = 0;
+        $length = strlen($record);
+        while ($offset < $length) {
+            $written = fwrite($handle, substr($record, $offset));
+            if ($written === false || $written === 0) {
+                throw new \RuntimeException("Cannot write storage file: {$file}");
+            }
+            $offset += $written;
+        }
     }
 }

@@ -15,6 +15,8 @@ final class IndexAgent
 
     public function build(string $collection, string $field): void
     {
+        $collection = preg_replace('/[^a-zA-Z0-9_-]/', '_', $collection) ?: 'default';
+        $field = preg_replace('/[^a-zA-Z0-9_-]/', '_', $field) ?: 'value';
         $indexFile = $this->basePath . "/{$collection}_{$field}.idx";
         $entries = [];
         $dataDir = dirname($this->basePath) . '/data';

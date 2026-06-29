@@ -7,6 +7,7 @@ $config = $boot['config'];
 
 use Jah\Memory\TieredMemory;
 use Jah\Http\JahTransport;
+use Jah\Http\RequestGuard;
 
 header('Content-Type: text/plain; charset=utf-8');
 
@@ -15,7 +16,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     exit;
 }
 
-$input = JahTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
+try {
+    RequestGuard::assertMethod(strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET'), ['POST']);
+    RequestGuard::authorize($config);
+    $input = JahTransport::decodeRequest((int)($config['security']['max_payload_bytes'] ?? 1048576));
+} catch (Throwable $e) {
+    JahTransport::respond(['status' => 'error', 'error' => $e->getMessage()], null, 400);
+    exit;
+}
 
 $userMessage = trim((string)($input['message'] ?? ''));
 if ($userMessage === '') {
@@ -42,6 +50,7 @@ $output = [
     'context_used' => $result['context_used'],
     'context_preview' => $result['context_preview'],
     'memories' => $result['memories'],
+    'memory_search' => $result['memory_search'] ?? [],
     'classification' => $result['classification'] ?? [],
     'stored' => $result['stored'] ?? [],
     'actions_trace' => $result['actions_trace'],

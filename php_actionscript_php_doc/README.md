@@ -1,14 +1,14 @@
 # JAH ActionScript PHP
 
-Motor experimental de acciones y politicas JAS escrito solamente en PHP.
+Motor de acciones y politicas JAS escrito solamente en PHP.
 
 ## Componentes
 
 - `ActionScriptEngine.php`: registro y ejecucion de acciones.
 - `JahEngineJas.php`: carga y evaluacion de politicas `.jas`.
-- `JasAsyncActions.php`: coordinacion de tareas y streams.
-- `JasBinaryCompiler.php`: generacion binaria experimental.
-- `JasNativeCompiler.php`: interfaz de compilacion nativa.
+- `JasAsyncActions.php`: procesos PHP concurrentes acotados y fallback declarado.
+- `JasBinaryCompiler.php`: bytecode JAS verificable e interpretable en PHP.
+- `JasNativeCompiler.php`: validacion real y escritura atomica de artefactos PHP.
 - `JasTypeScript.php`: declaraciones de tipos JAS.
 
 ## Ejemplo

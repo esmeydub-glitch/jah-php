@@ -91,7 +91,7 @@ final class CollectorAgent implements AgentInterface
 
         match ($this->source) {
             'file' => $results = $this->collectFile($data[0] ?? ''),
-            'http' => $results = $this->collectHttp($data[0] ?? ''),
+            'http' => throw new \LogicException('HTTP collector disabled: QwenConnector is the only external connection'),
             'stream' => $results = $this->collectStream($data[0] ?? []),
             default => $results = $this->collectMemory($data[0] ?? []),
         };
@@ -106,11 +106,7 @@ final class CollectorAgent implements AgentInterface
 
     private function collectHttp(string $url): array
     {
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        $response = curl_exec($ch);
-        curl_close($ch);
-        return PhpSerializer::decode($response, true) ?: [];
+        throw new \LogicException('HTTP collector disabled: QwenConnector is the only external connection');
     }
 
     private function collectStream(iterable $stream): array
@@ -147,33 +143,70 @@ final class TransformerAgent implements AgentInterface
         $result = $data[0] ?? [];
 
         foreach ($this->pipeline as $op) {
-            $result = match ($op) {
-                'sort' => $this->sortBy($result),
-                'filter' => $this->filterBy($result),
-                'map' => $this->mapValues($result),
+            $name = is_array($op) ? (string)($op['name'] ?? '') : (string)$op;
+            $result = match ($name) {
+                'sort' => $this->sortBy($result, is_array($op) ? $op : []),
+                'filter' => $this->filterBy($result, is_array($op) ? $op : []),
+                'map' => $this->mapValues($result, is_array($op) ? $op : []),
                 'unique' => array_unique($result),
-                'limit' => array_slice($result, 0, $op['count'] ?? 100),
-                default => $result,
+                'limit' => array_slice($result, 0, is_array($op) ? (int)($op['count'] ?? 100) : 100),
+                default => throw new \InvalidArgumentException("Unknown transformer operation: {$name}"),
             };
         }
 
         return $result;
     }
 
-    private function sortBy(array $data): array
+    private function sortBy(array $data, array $operation): array
     {
-        usort($data, fn($a, $b) => $a <=> $b);
+        $field = $operation['field'] ?? null;
+        $direction = strtolower((string) ($operation['direction'] ?? 'asc')) === 'desc' ? -1 : 1;
+        usort($data, static function (mixed $left, mixed $right) use ($field, $direction): int {
+            $a = is_string($field) && is_array($left) ? ($left[$field] ?? null) : $left;
+            $b = is_string($field) && is_array($right) ? ($right[$field] ?? null) : $right;
+            return ($a <=> $b) * $direction;
+        });
         return $data;
     }
 
-    private function filterBy(array $data): array
+    private function filterBy(array $data, array $operation): array
     {
-        return array_values(array_filter($data));
+        if (isset($operation['callback']) && is_callable($operation['callback'])) {
+            return array_values(array_filter($data, $operation['callback']));
+        }
+        if (is_string($operation['field'] ?? null)) {
+            $field = $operation['field'];
+            $expected = $operation['value'] ?? null;
+            return array_values(array_filter(
+                $data,
+                static fn(mixed $row): bool => is_array($row) && ($row[$field] ?? null) === $expected
+            ));
+        }
+        throw new \InvalidArgumentException('Filter operation requires a callback or field/value');
     }
 
-    private function mapValues(array $data): array
+    private function mapValues(array $data, array $operation): array
     {
-        return array_map(fn($x) => $x, $data);
+        if (isset($operation['callback']) && is_callable($operation['callback'])) {
+            return array_map($operation['callback'], $data);
+        }
+        $fields = $operation['fields'] ?? null;
+        if (is_array($fields) && $fields !== []) {
+            return array_map(static function (mixed $row) use ($fields): array {
+                if (!is_array($row)) {
+                    throw new \InvalidArgumentException('Field mapping requires array rows');
+                }
+                $mapped = [];
+                foreach ($fields as $target => $source) {
+                    if (is_int($target)) {
+                        $target = (string) $source;
+                    }
+                    $mapped[(string) $target] = $row[(string) $source] ?? null;
+                }
+                return $mapped;
+            }, $data);
+        }
+        throw new \InvalidArgumentException('Map operation requires a callback or fields map');
     }
 
     public function getName(): string { return 'transformer'; }
@@ -227,19 +260,9 @@ final class EnricherAgent implements AgentInterface
     public function run(mixed ...$data): array
     {
         $item = $data[0] ?? [];
-
-        foreach ($this->sources as $field => $url) {
-            $ch = curl_init(str_replace('{id}', $item['id'] ?? '', $url));
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 1);
-            $enriched = curl_exec($ch);
-            curl_close($ch);
-
-            if ($enriched) {
-                $item[$field] = PhpSerializer::decode($enriched, true);
-            }
+        if ($this->sources !== []) {
+            throw new \LogicException('External enricher disabled: QwenConnector is the only external connection');
         }
-
         return $item;
     }
 

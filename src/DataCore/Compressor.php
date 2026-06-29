@@ -18,7 +18,7 @@ final class Compressor
             'zstd' => function_exists('zstd_compress')
                 ? zstd_compress($data)
                 : self::phpCompact($data),
-            'gzip' => gzencode($data),
+            'gzip' => self::gzipEncode($data),
             default => $data,
         };
     }
@@ -32,7 +32,7 @@ final class Compressor
             'zstd' => function_exists('zstd_decompress')
                 ? zstd_decompress($data)
                 : $data,
-            'gzip' => gzdecode($data),
+            'gzip' => self::gzipDecode($data),
             default => $data,
         };
     }
@@ -42,6 +42,20 @@ final class Compressor
         // Compacta payload serializado PHP si es posible
         $decoded = PhpSerializer::decode($payload);
         return $decoded === null ? $payload : PhpSerializer::encode($decoded);
+    }
+
+    private static function gzipEncode(string $data): string
+    {
+        $encoded = gzencode($data);
+        if ($encoded === false) throw new \RuntimeException('gzip compression failed');
+        return $encoded;
+    }
+
+    private static function gzipDecode(string $data): string
+    {
+        $decoded = gzdecode($data);
+        if ($decoded === false) throw new \RuntimeException('gzip decompression failed');
+        return $decoded;
     }
 
     public static function compressFile(string $input, string $output, string $algo = 'gzip'): bool

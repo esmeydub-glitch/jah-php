@@ -1,52 +1,19 @@
-# JAH MemoryAgent — Qwen Only External Connection
+# Pure PHP Runtime Contract
 
-Modo final para hackathon:
+JAH runs on PHP 8.1+ without Composer, Node.js, npm, Java, a SQL server or a vector database.
 
-```text
-PHP puro
-ActionScript PHP JAH
-DataCore con serialización PHP/JAH
-SALK audit en .jahl
-Salida pública text/plain con var_export()
-QwenConnector como única conexión externa especial
-```
+## Allowed runtime mechanisms
 
-## Flujo activo
+- PHP arrays, callables, generators and optional Fibers.
+- Files, locks, hashes, compression and PHP serialization.
+- Native PHP cURL only for the Qwen Cloud boundary.
+- Optional PCNTL or Swoole for PHP worker execution.
+- HTML forms rendered and processed by PHP; no client-side script is required.
 
-```text
-public/index.php / public/agent.php / public/api.php
-        ↓
-app/actions/MemoryActionScript.php
-        ↓
-src/DataCore/
-        ↓
-app/QwenConnector.php
-        ↓
-Qwen Cloud
-```
+## Data formats
 
-## Reglas
+DataCore records and SALK audit entries use the `JAHPS1:` envelope produced by `PhpSerializer`. Public endpoints emit `text/plain` in the `JAH_RESPONSE` format. QwenConnector encodes and decodes the provider's required wire payload at the external boundary; that format is not used for internal storage or actions.
 
-```text
-No Node
-No npm
-No package runtime
-No acciones internas en formatos externos
-No configuración interna en formatos externos
-No secretos en respuestas públicas
-QWEN_API_KEY solo en header Authorization dentro de QwenConnector
-```
+## Enforcement
 
-## Archivos clave
-
-```text
-app/actions/MemoryActionScript.php
-app/actions/SalkSecurityActionScript.php
-app/security/SalkGuard.php
-app/http/JahTransport.php
-app/QwenConnector.php
-src/DataCore/PhpSerializer.php
-public/index.php
-public/agent.php
-public/api.php
-```
+`SalkGuard::checkPackageVectors()` reports Node package artifacts, Composer manifests and executable script files that violate the runtime boundary. Automated PHP lint and product tests are listed in [`TEST_RESULTS.md`](TEST_RESULTS.md).

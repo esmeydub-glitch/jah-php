@@ -1,52 +1,20 @@
-# JAH MemoryAgent — Qwen Only External Connection
+# Hackathon Release Audit
 
-Modo final para hackathon:
+## Verified in source
 
-```text
-PHP puro
-ActionScript PHP JAH
-DataCore con serialización PHP/JAH
-SALK audit en .jahl
-Salida pública text/plain con var_export()
-QwenConnector como única conexión externa especial
-```
+- Track 1 MemoryAgent scope is stated.
+- PHP-only runtime and Qwen boundary are documented.
+- Architecture and repository diagrams are present.
+- DataCore and ActionScript have focused technical documents.
+- Fake native-binary claims were removed: JAS bytecode identifies itself as JAS.
+- Compiler validation, asynchronous execution and local replication have real tests.
+- MIT license is present.
+- Public repository URL verified: [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php). The repaired local revision still requires commit and push.
 
-## Flujo activo
+## External evidence still required
 
-```text
-public/index.php / public/agent.php / public/api.php
-        ↓
-app/actions/MemoryActionScript.php
-        ↓
-src/DataCore/
-        ↓
-app/QwenConnector.php
-        ↓
-Qwen Cloud
-```
+These values cannot truthfully be generated from source code:
 
-## Reglas
+- the public three-minute demo video URL.
 
-```text
-No Node
-No npm
-No package runtime
-No acciones internas en formatos externos
-No configuración interna en formatos externos
-No secretos en respuestas públicas
-QWEN_API_KEY solo en header Authorization dentro de QwenConnector
-```
-
-## Archivos clave
-
-```text
-app/actions/MemoryActionScript.php
-app/actions/SalkSecurityActionScript.php
-app/security/SalkGuard.php
-app/http/JahTransport.php
-app/QwenConnector.php
-src/DataCore/PhpSerializer.php
-public/index.php
-public/agent.php
-public/api.php
-```
+Public Alibaba proof: [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md), backed by [`app/QwenConnector.php`](app/QwenConnector.php). Complete the public demo-video link after uploading it.

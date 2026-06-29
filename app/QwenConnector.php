@@ -16,11 +16,11 @@ class QwenConnector
     public function chat(string $prompt, string $context = '', string $model = 'qwen-max'): string
     {
         if ($this->apiKey === '') {
-            return 'Error: QWEN_API_KEY no configurada.';
+            throw new RuntimeException('QWEN_API_KEY no configurada.');
         }
 
         if (!function_exists('curl_init')) {
-            return 'Error: PHP cURL no está disponible. Qwen Cloud requiere cURL nativo de PHP.';
+            throw new RuntimeException('PHP cURL no está disponible. Qwen Cloud requiere cURL nativo de PHP.');
         }
 
         $systemPrompt = "You are Qwen, an AI assistant created by Alibaba Cloud. Always respond in Spanish. Use stored memory only when relevant. Never invent stored user preferences.";
@@ -39,17 +39,17 @@ class QwenConnector
         ];
 
         if ($this->containsForbiddenPayloadKeys($data)) {
-            return 'Error: payload Qwen bloqueado por SALK: no se permiten secretos en el cuerpo.';
+            throw new RuntimeException('Payload Qwen bloqueado por SALK: no se permiten secretos en el cuerpo.');
         }
 
         $jsonPayload = json_encode($data, JSON_UNESCAPED_UNICODE);
         if ($jsonPayload === false) {
-            return 'Error: no se pudo preparar la petición para Qwen.';
+            throw new RuntimeException('No se pudo preparar la petición para Qwen.');
         }
 
         $ch = curl_init($this->baseUrl . '/chat/completions');
         if ($ch === false) {
-            return 'Error: no se pudo iniciar cURL.';
+            throw new RuntimeException('No se pudo iniciar cURL.');
         }
 
         curl_setopt_array($ch, [
@@ -70,11 +70,11 @@ class QwenConnector
         curl_close($ch);
 
         if ($response === false) {
-            return 'Error cURL: ' . ($curlError !== '' ? $curlError : 'sin respuesta');
+            throw new RuntimeException('Error cURL: ' . ($curlError !== '' ? $curlError : 'sin respuesta'));
         }
 
         if ($httpCode < 200 || $httpCode >= 300) {
-            return "Error HTTP {$httpCode}: " . substr($response, 0, 500);
+            throw new RuntimeException("Error HTTP {$httpCode} al consultar Qwen.");
         }
 
         return $this->parseResponse($response);
@@ -109,7 +109,7 @@ class QwenConnector
     {
         $result = json_decode($response, true);
         if (!is_array($result)) {
-            return 'Respuesta no interpretable de Qwen: ' . substr($response, 0, 300);
+            throw new RuntimeException('Respuesta no interpretable de Qwen.');
         }
 
         if (isset($result['choices'][0]['message']['content'])) {
@@ -120,6 +120,6 @@ class QwenConnector
             return (string)$result['output']['choices'][0]['message']['content'];
         }
 
-        return 'Respuesta vacía de Qwen: ' . substr($response, 0, 300);
+        throw new RuntimeException('Respuesta vacía de Qwen.');
     }
 }

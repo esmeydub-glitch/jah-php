@@ -21,7 +21,7 @@ final class LockAgent
 
     public function acquire(string $resource, int $timeoutMs = 5000): void
     {
-        $lockFile = $this->basePath . "/{$resource}.lock";
+        $lockFile = $this->lockFile($resource);
         $fp = fopen($lockFile, 'w');
         if ($fp === false) {
             throw new RuntimeException("Cannot create lock: {$resource}");
@@ -44,8 +44,13 @@ final class LockAgent
         if (isset($this->locks[$resource])) {
             flock($this->locks[$resource], LOCK_UN);
             fclose($this->locks[$resource]);
-            @unlink($this->basePath . "/{$resource}.lock");
+            @unlink($this->lockFile($resource));
             unset($this->locks[$resource]);
         }
+    }
+
+    private function lockFile(string $resource): string
+    {
+        return $this->basePath . '/' . hash('sha256', $resource) . '.lock';
     }
 }
