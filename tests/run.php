@@ -14,7 +14,6 @@ require_once dirname(__DIR__) . '/app/actions/MemoryActionScript.php';
 use Jah\DataCore\DataCoreTurbo;
 use Jah\DataCore\ReplicationAgent;
 use Jah\DataCore\WorkerPool;
-use Jah\DataCore\AgentFactory;
 use Jah\Actions\ActionScript;
 use Jah\Http\RequestGuard;
 use Jah\Memory\TieredMemory;
@@ -273,19 +272,6 @@ check('worker_pool_reports_confirmed_inserts', function () use ($base): void {
     $storage = new \Jah\DataCore\StorageAgent($poolPath . '/data');
     expectTrue(count($storage->query('docs', static fn(array $row): bool => true)) === 4, 'worker pool did not persist every document');
     $storage->close();
-});
-
-check('transformer_map_performs_declared_mapping', function () use ($base): void {
-    $factory = new AgentFactory($base . '/agents');
-    $factory->create('transformer', [
-        'id' => 'project-fields',
-        'pipeline' => [[
-            'name' => 'map',
-            'fields' => ['label' => 'name', 'score' => 'value'],
-        ]],
-    ]);
-    $mapped = $factory->execute('project-fields', [['name' => 'memory', 'value' => 9]]);
-    expectTrue($mapped === [['label' => 'memory', 'score' => 9]], 'transformer map returned unchanged input');
 });
 
 check('pyramidal_conversation_context_survives_requests', function () use ($base): void {

@@ -24,7 +24,6 @@ require_once __DIR__ . '/core/Autoloader.php';
 Autoloader::register();
 Autoloader::addNamespace('Jah\\Core\\', __DIR__ . '/core');
 Autoloader::addNamespace('Jah\\Memory\\', __DIR__ . '/memory');
-Autoloader::addNamespace('Jah\\Network\\', __DIR__ . '/network');
 Autoloader::addNamespace('Jah\\Cache\\', __DIR__ . '/cache');
 Autoloader::addNamespace('Jah\\Security\\', __DIR__ . '/security');
 Autoloader::addNamespace('Jah\\Http\\', __DIR__ . '/http');

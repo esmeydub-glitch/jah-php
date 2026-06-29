@@ -7,7 +7,7 @@ JAH runs on PHP 8.1+ without Composer, Node.js, npm, Java, a SQL server or a vec
 - PHP arrays, callables, generators and optional Fibers.
 - Files, locks, hashes, compression and PHP serialization.
 - Native PHP cURL only for the Qwen Cloud boundary.
-- Optional PCNTL or Swoole for PHP worker execution.
+- Optional PCNTL for PHP worker execution.
 - HTML forms rendered and processed by PHP; no client-side script is required.
 
 ## Data formats

@@ -5,7 +5,7 @@ Verified locally on 2026-06-28:
 ```text
 JAS compiler and bytecode: 7/7 PASS
 ActionScript runtime: 7/7 PASS
-MemoryAgent product: 19/19 PASS
+MemoryAgent product: 18/18 PASS
 PHP lint: PASS
 ```
 

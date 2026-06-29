@@ -6,7 +6,8 @@
 - PHP-only runtime and Qwen boundary are documented.
 - Architecture and repository diagrams are present.
 - DataCore and ActionScript have focused technical documents.
-- Fake native-binary claims were removed: JAS bytecode identifies itself as JAS.
+- JAS bytecode identifies itself accurately as JAS rather than claiming to be a native executable.
+- Unused relational-database and demonstration-agent modules were removed from the production surface.
 - Compiler validation, asynchronous execution and local replication have real tests.
 - MIT license is present.
 - Public repository published and verified: [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php).

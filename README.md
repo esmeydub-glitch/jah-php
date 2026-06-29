@@ -157,8 +157,9 @@ all older Hot, Warm, and Cold copies are suppressed during retrieval
 │   ├── DataCoreTurbo.php                 # Segments, pointers and inverted index
 │   ├── MemoryPyramid.php                 # Hot / Warm / Cold persistence
 │   ├── PhpSerializer.php                 # JAHPS1 PHP serialization
-│   ├── WALTransactionCore.php            # Durable write-ahead transactions
-│   └── ...                               # Index, integrity, lock and worker agents
+│   ├── StorageAgent.php                  # Locked append-only worker storage
+│   ├── WorkerPool.php                    # Verified bounded PHP processes
+│   └── ReplicationAgent.php              # Signed local replication
 ├── php_actionscript_php_doc/
 │   ├── ActionScriptEngine.php            # Pure PHP action runtime
 │   ├── JahEngineJas.php                   # JAS policy evaluator
@@ -181,7 +182,7 @@ all older Hot, Warm, and Cold copies are suppressed during retrieval
 - PHP zlib extension for Cold memory compression.
 - A Qwen Cloud API key.
 - Write access to the configured runtime and session paths.
-- Optional: PCNTL or Swoole for worker pools; neither is required by the official runtime.
+- Optional: PCNTL for parallel worker execution; it is not required by the official request path.
 
 No Composer, Node.js, npm, Java, database server, or frontend build process is required.
 
@@ -313,7 +314,7 @@ php tests/run.php
 Expected result:
 
 ```text
-SUMMARY 19/19
+SUMMARY 18/18
 ```
 
 Run the ActionScript PHP suite:

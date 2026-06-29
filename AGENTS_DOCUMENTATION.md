@@ -9,15 +9,14 @@ The active product agent classifies input, retrieves relevant memory, bounds con
 | Agent | Real responsibility |
 |---|---|
 | `StorageAgent` | Binary append/read operations |
-| `IndexAgent` | Persistent record indexes |
-| `LockAgent` | Filesystem concurrency control |
-| `IntegrityAgent` | Stored-data integrity checks |
-| `CompactionAgent` | Rebuild and compaction work |
-| `SnapshotAgent` | Local snapshots |
+| `DataCoreTurbo` | Canonical segments, direct pointers, inverted postings, tombstones and index rebuilding |
+| `MemoryPyramid` | Hot conversation, seven-day Warm history and permanent Cold records |
 | `ReplicationAgent` | Signed, append-only local replicas; no outbound HTTP |
-| `WorkerPool` / `SwooleWorkerPool` | Bounded PHP task execution |
+| `WorkerPool` | Bounded PCNTL task execution with a verified sequential fallback |
+| `CacheAgent` | In-request Hot cache used by MemoryPyramid |
+| `Compressor` | Cold-memory compression and decompression |
 
-External HTTP collectors and enrichers are deliberately unavailable in Qwen-only mode. Calling them raises an explicit exception; they never return simulated success.
+Unused collector, enricher, exporter, cleaner, scheduler, alternate storage and relational-database modules were removed from the production surface. QwenConnector remains the only external HTTP boundary.
 
 ## ActionScript utilities
 
