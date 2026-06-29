@@ -19,7 +19,7 @@ The Qwen API key is loaded from the environment and is sent only in the HTTP `Au
 |---|---|
 | Qwen Cloud integration code | Complete |
 | Alibaba Cloud backend resource | Pending deployment confirmation |
-| Public source repository | URL verified; repaired local revision awaiting publication — [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php) |
+| Public source repository | Complete — [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php) |
 | Public Alibaba Cloud proof document | Complete — [raw ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md) |
 | Required Alibaba service/API code link | Complete — [`app/QwenConnector.php`](app/QwenConnector.php) |
 

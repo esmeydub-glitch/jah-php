@@ -349,7 +349,7 @@ The public Alibaba Cloud proof is [ALIBABA_CLOUD_PROOF.md](https://raw.githubuse
 | Deliverable | Status |
 |---|---|
 | Track identified as **Track 1: MemoryAgent** | Complete |
-| Public source repository | URL verified — [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php); repaired local revision must still be pushed |
+| Public source repository | Complete — [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php) |
 | Detectable open-source license | Complete — [MIT License](LICENSE) |
 | Architecture diagram | Complete — included above |
 | Text description and feature explanation | Complete — included above |

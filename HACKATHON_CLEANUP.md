@@ -9,7 +9,7 @@
 - Fake native-binary claims were removed: JAS bytecode identifies itself as JAS.
 - Compiler validation, asynchronous execution and local replication have real tests.
 - MIT license is present.
-- Public repository URL verified: [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php). The repaired local revision still requires commit and push.
+- Public repository published and verified: [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php).
 
 ## External evidence still required
 
