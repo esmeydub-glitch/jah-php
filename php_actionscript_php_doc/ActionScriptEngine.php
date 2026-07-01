@@ -78,7 +78,7 @@ class ActionScript
             $fiber->start();
 
             while (!$fiber->isTerminated()) {
-                $fiber->resume();
+                \Jah\JasEventLoop::tick();
                 $elapsed = (hrtime(true) - $startedAt) / 1_000_000;
                 if ($elapsed > $this->timeoutMs) {
                     return $this->failure(
