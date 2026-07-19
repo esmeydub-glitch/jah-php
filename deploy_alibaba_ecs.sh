@@ -43,6 +43,31 @@ require_ecs_root() {
     fi
 }
 
+configure_remi_php82_repo() {
+    # Alibaba Cloud Linux 3 is EL8-compatible, but its system-release does not
+    # satisfy the dependency declared by remi-release-8.rpm. Configure only the
+    # required signed repositories directly instead of forcing that RPM.
+    local repo_file="/etc/yum.repos.d/jah-remi-php82.repo"
+    cat > "$repo_file" <<'REPO'
+[jah-remi-safe]
+name=Remi Safe for JAH (Enterprise Linux 8)
+baseurl=https://rpms.remirepo.net/enterprise/8/safe/$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=https://rpms.remirepo.net/RPM-GPG-KEY-remi2024
+
+[jah-remi-php82]
+name=Remi PHP 8.2 for JAH (Enterprise Linux 8)
+baseurl=https://rpms.remirepo.net/enterprise/8/php82/$basearch/
+enabled=1
+gpgcheck=1
+gpgkey=https://rpms.remirepo.net/RPM-GPG-KEY-remi2024
+module_hotfixes=1
+REPO
+    rpm --import https://rpms.remirepo.net/RPM-GPG-KEY-remi2024
+    dnf clean metadata
+}
+
 install_dependencies() {
     log "Instalando herramientas y PHP 8.2"
     dnf install -y git curl unzip yum-utils
@@ -54,12 +79,10 @@ install_dependencies() {
     fi
 
     if [[ "$needs_php" == yes ]]; then
-        dnf install -y https://rpms.remirepo.net/enterprise/remi-release-8.rpm
-        dnf module reset php -y
-        dnf module install php:remi-8.2 -y
+        configure_remi_php82_repo
     fi
 
-    dnf install -y php php-cli php-common php-mbstring php-process
+    dnf install -y --allowerasing php php-cli php-common php-mbstring php-process
 
     php -r 'exit(version_compare(PHP_VERSION, "8.1.0", ">=") ? 0 : 1);' \
         || die "JAH requiere PHP 8.1 o superior."
