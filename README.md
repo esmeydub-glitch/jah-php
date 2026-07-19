@@ -191,7 +191,7 @@ No Composer, Node.js, npm, Java, database server, or frontend build process is r
 Clone the public repository:
 
 ```bash
-git clone https://github.com/esmeydub-glitch/jah-php.git
+git clone https://github.com/esmeydub/jah-php.git
 cd jah-php
 cp .env.example .env
 ```
@@ -214,6 +214,19 @@ php -S 0.0.0.0:8000 -t public
 ```
 
 Open `http://localhost:8000/index.php`. When `JAH_API_KEY` is configured, the PHP interface presents a server-side login form. Without it, access is restricted to loopback clients.
+
+## Automated Alibaba Cloud ECS deployment
+
+On an Alibaba Cloud Linux 3 ECS instance, the included installer preserves the full verification flow while keeping credentials out of Git. It installs PHP 8.2, requests `QWEN_API_KEY` and `JAH_API_KEY` with hidden terminal input, runs both test suites, installs a `systemd` service on port 8000, exercises Qwen and cross-session memory, and writes a deployment proof report under the ignored `runtime/deployment/` directory.
+
+```bash
+git clone https://github.com/esmeydub/jah-php.git
+cd jah-php
+chmod 755 deploy_alibaba_ecs.sh
+./deploy_alibaba_ecs.sh
+```
+
+The script never contains or prints either key. `.env` and all generated runtime evidence remain excluded from version control. Opening inbound TCP port 8000 in the ECS Security Group is intentionally manual because it belongs to the Alibaba Cloud account boundary.
 
 ## API examples
 
@@ -361,22 +374,22 @@ The index intentionally trades about 0.14 ms of additional write work per docume
 ## Alibaba Cloud and Qwen Cloud deployment
 
 - Qwen Cloud integration code: [`app/QwenConnector.php`](app/QwenConnector.php)
-- Public Alibaba Cloud proof: [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md)
+- Public Alibaba Cloud proof: [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md)
 - Backend deployment target: Alibaba Cloud compute with Qwen Cloud inference.
 
-The public Alibaba Cloud proof is [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md), with the service/API implementation in [`app/QwenConnector.php`](app/QwenConnector.php). Do not commit or expose cloud credentials.
+The public Alibaba Cloud proof is [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md), with the service/API implementation in [`app/QwenConnector.php`](app/QwenConnector.php). Do not commit or expose cloud credentials.
 
 ## Hackathon submission
 
 | Deliverable | Status |
 |---|---|
 | Track identified as **Track 1: MemoryAgent** | Complete |
-| Public source repository | Complete — [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php) |
+| Public source repository | Complete — [github.com/esmeydub/jah-php](https://github.com/esmeydub/jah-php) |
 | Detectable open-source license | Complete — [MIT License](LICENSE) |
 | Architecture diagram | Complete — included above |
 | Text description and feature explanation | Complete — included above |
 | Alibaba Cloud integration code | Complete — [`QwenConnector.php`](app/QwenConnector.php) |
-| Public Alibaba Cloud proof | Complete — [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md) |
+| Public Alibaba Cloud proof | Complete — [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md) |
 | Alibaba Cloud service/API code | Complete — [`app/QwenConnector.php`](app/QwenConnector.php) |
 | Approximately three-minute public demo video | **Add YouTube, Vimeo, or Facebook Video URL before submission** |
 | Optional public build journey post | Optional Blog Post Award entry |

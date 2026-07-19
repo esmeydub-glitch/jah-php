@@ -10,7 +10,7 @@
 - Unused relational-database and demonstration-agent modules were removed from the production surface.
 - Compiler validation, asynchronous execution and local replication have real tests.
 - MIT license is present.
-- Public repository published and verified: [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php).
+- Public repository published and verified: [github.com/esmeydub/jah-php](https://github.com/esmeydub/jah-php).
 
 ## External evidence still required
 
@@ -18,4 +18,4 @@ These values cannot truthfully be generated from source code:
 
 - the public three-minute demo video URL.
 
-Public Alibaba proof: [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md), backed by [`app/QwenConnector.php`](app/QwenConnector.php). Complete the public demo-video link after uploading it.
+Public Alibaba proof: [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md), backed by [`app/QwenConnector.php`](app/QwenConnector.php). Complete the public demo-video link after uploading it.

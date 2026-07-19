@@ -19,11 +19,23 @@ The Qwen API key is loaded from the environment and is sent only in the HTTP `Au
 |---|---|
 | Qwen Cloud integration code | Complete |
 | Alibaba Cloud backend resource | Pending deployment confirmation |
-| Public source repository | Complete — [github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php) |
-| Public Alibaba Cloud proof document | Complete — [raw ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md) |
+| Public source repository | Complete — [github.com/esmeydub/jah-php](https://github.com/esmeydub/jah-php) |
+| Public Alibaba Cloud proof document | Complete — [raw ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md) |
 | Required Alibaba service/API code link | Complete — [`app/QwenConnector.php`](app/QwenConnector.php) |
+| Reproducible ECS installer | Complete — [`deploy_alibaba_ecs.sh`](deploy_alibaba_ecs.sh) |
 
 Do not mark the backend deployment complete until the resource and live request have been verified.
+
+## Automated ECS deployment
+
+On Alibaba Cloud Linux 3, run the repository installer as root:
+
+```bash
+chmod 755 deploy_alibaba_ecs.sh
+./deploy_alibaba_ecs.sh
+```
+
+The installer requests both keys with hidden input, writes them only to the ignored `.env`, validates the PHP source, runs the 18/18 product suite and 7/7 ActionScript suite, starts `jah-memoryagent.service`, performs live memory checks, and creates `runtime/deployment/alibaba-ecs-proof.txt`. The ECS Security Group rule for inbound TCP 8000 remains a manual cloud-console step.
 
 ## Deployment verification checklist
 
@@ -69,8 +81,9 @@ curl -X POST \
 
 ## Submission links
 
-- Public source repository: [https://github.com/esmeydub-glitch/jah-php](https://github.com/esmeydub-glitch/jah-php)
-- Public Alibaba Cloud proof: [https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md)
-- Alibaba Cloud service/API code: [public QwenConnector.php](https://github.com/esmeydub-glitch/jah-php/blob/main/app/QwenConnector.php)
+- Public source repository: [https://github.com/esmeydub/jah-php](https://github.com/esmeydub/jah-php)
+- Public Alibaba Cloud proof: [https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md)
+- Alibaba Cloud service/API code: [public QwenConnector.php](https://github.com/esmeydub/jah-php/blob/main/app/QwenConnector.php)
+- Automated ECS installer: [deploy_alibaba_ecs.sh](https://github.com/esmeydub/jah-php/blob/main/deploy_alibaba_ecs.sh)
 
 The required public video link is the approximately three-minute demo listed in [`README.md`](README.md).
