@@ -54,17 +54,18 @@ name=Remi Safe for JAH (Enterprise Linux 8)
 baseurl=https://rpms.remirepo.net/enterprise/8/safe/$basearch/
 enabled=1
 gpgcheck=1
-gpgkey=https://rpms.remirepo.net/RPM-GPG-KEY-remi2024
+gpgkey=https://rpms.remirepo.net/RPM-GPG-KEY-remi2018
 
 [jah-remi-php82]
 name=Remi PHP 8.2 for JAH (Enterprise Linux 8)
 baseurl=https://rpms.remirepo.net/enterprise/8/php82/$basearch/
 enabled=1
 gpgcheck=1
-gpgkey=https://rpms.remirepo.net/RPM-GPG-KEY-remi2024
+gpgkey=https://rpms.remirepo.net/RPM-GPG-KEY-remi2018
 module_hotfixes=1
 REPO
-    rpm --import https://rpms.remirepo.net/RPM-GPG-KEY-remi2024
+    # Remi signs Enterprise Linux 8 packages with its official 2018 key.
+    rpm --import https://rpms.remirepo.net/RPM-GPG-KEY-remi2018
     dnf clean metadata
 }
 
