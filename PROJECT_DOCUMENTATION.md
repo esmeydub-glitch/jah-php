@@ -21,7 +21,7 @@ PHP HTTP endpoint
 | [`DATACORE_ARCHITECTURE.md`](DATACORE_ARCHITECTURE.md) | Persistent records, indexes and retrieval |
 | [`SALK_SECURITY.md`](SALK_SECURITY.md) | Security boundary and audit controls |
 | [`TEST_RESULTS.md`](TEST_RESULTS.md) | Reproducible automated evidence |
-| [Public Alibaba Cloud proof](https://raw.githubusercontent.com/esmeydub-glitch/jah-php/main/ALIBABA_CLOUD_PROOF.md) | Public cloud proof and verification checklist |
+| [Public Alibaba Cloud proof](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md) | Public cloud proof and verification checklist |
 
 ## Runtime boundaries
 
