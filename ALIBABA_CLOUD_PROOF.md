@@ -18,7 +18,9 @@ The Qwen API key is loaded from the environment and is sent only in the HTTP `Au
 | Evidence | Status |
 |---|---|
 | Qwen Cloud integration code | Complete |
-| Alibaba Cloud backend resource | Verified on Alibaba Cloud ECS |
+| Alibaba Cloud backend resource | Complete — deployed on Alibaba Cloud ECS |
+| Public endpoint | Complete — [http://47.77.201.239:8000/index.php](http://47.77.201.239:8000/index.php) |
+| Access control | Complete — protected with temporary `JAH_API_KEY` login; judge key shared privately |
 | Public source repository | Complete — [github.com/esmeydub/jah-php](https://github.com/esmeydub/jah-php) |
 | Public Alibaba Cloud proof document | Complete — this document and the deployment screenshot below |
 | Required Alibaba service/API code link | Complete — [`app/QwenConnector.php`](app/QwenConnector.php) |

@@ -6,6 +6,14 @@
 ![PHP](https://img.shields.io/badge/PHP-8.1%2B-777BB4.svg)
 ![Qwen Cloud](https://img.shields.io/badge/AI-Qwen%20Cloud-6f42c1.svg)
 
+## Live Demo
+
+The project is deployed on Alibaba Cloud ECS:
+
+[http://47.77.201.239:8000/index.php](http://47.77.201.239:8000/index.php)
+
+The public demo is protected with a temporary `JAH_API_KEY` login to prevent unauthorized Qwen Cloud API usage. The Qwen credential remains server-side and is never exposed to the browser, repository, or public documentation. Judge access is provided privately through the Devpost testing instructions.
+
 JAH MemoryAgent is a persistent-memory AI agent built in pure PHP. It learns durable user preferences and project facts across sessions, retrieves only relevant memories for a limited Qwen context window, and forgets information through persistent tombstones. Its internal ActionScript PHP runtime coordinates security, classification, retrieval, Qwen inference, storage, migration, and audit actions.
 
 The project uses no Node.js, npm, Java, or browser JavaScript. Internal configuration and storage use PHP arrays and JAH/PHP serialization. JSON is isolated inside `app/QwenConnector.php` only because the Qwen Cloud compatible API requires it at the external boundary.
