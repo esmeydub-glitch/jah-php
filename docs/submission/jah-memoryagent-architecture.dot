@@ -1,0 +1,59 @@
+digraph JAHMemoryAgent {
+  graph [
+    label="JAH MemoryAgent — Qwen Cloud Architecture",
+    labelloc=t,
+    fontsize=24,
+    fontname="DejaVu Sans Bold",
+    bgcolor="#071426",
+    color="#27364d",
+    fontcolor="white",
+    pad=0.35,
+    nodesep=0.45,
+    ranksep=0.65,
+    splines=ortho
+  ];
+  node [
+    shape=box,
+    style="rounded,filled",
+    fillcolor="#10223a",
+    color="#16d9e3",
+    fontcolor="white",
+    fontname="DejaVu Sans",
+    fontsize=13,
+    margin="0.18,0.12"
+  ];
+  edge [color="#8cf400", fontcolor="#d9ffad", fontname="DejaVu Sans", fontsize=10, penwidth=1.7];
+
+  user [label="User / Judge\nBrowser · CLI · API"];
+
+  subgraph cluster_ecs {
+    label="Alibaba Cloud ECS — PHP 8.2 backend";
+    color="#61718a";
+    fontcolor="#cbd5e1";
+    style="rounded,dashed";
+
+    boundary [label="Server-rendered PHP boundary\nRequestGuard · authentication · CSRF"];
+    salk [label="SALK security preflight\nsecret detection · masking · audit", color="#8cf400"];
+    runtime [label="ActionScript PHP runtime\nclassify → retrieve → bound → infer → persist"];
+    pyramid [label="MemoryPyramid\nHot · Warm · Cold · forgetting"];
+    datacore [label="DataCoreTurbo\nappend-only binary records\nSHA-256 pointers · inverted index"];
+    context [label="Bounded relevant context\nrecent turns + retrieved memories"];
+  }
+
+  connector [label="QwenConnector\nnative PHP cURL · HTTPS\nAPI key only in Authorization header"];
+  qwen [label="Qwen Cloud\nqwen-max", color="#8cf400", penwidth=2.2];
+
+  user -> boundary [label="SSH tunnel to localhost:8000"];
+  boundary -> salk [label="validated request"];
+  salk -> runtime;
+  runtime -> pyramid [label="classify / retrieve / store"];
+  pyramid -> datacore [label="persistent records"];
+  datacore -> context [label="ranked retrieval"];
+  runtime -> context [label="recent conversation"];
+  context -> connector [label="context injection"];
+  connector -> qwen [label="OpenAI-compatible API"];
+  qwen -> connector [label="model response"];
+  connector -> runtime [label="answer"];
+  runtime -> pyramid [label="memory decision"];
+  runtime -> boundary [label="masked JAH_RESPONSE"];
+}

@@ -211,16 +211,17 @@ install_service() {
     systemctl status "$SERVICE_NAME" --no-pager -l | sed -n '1,18p'
 }
 
-open_firewall() {
-    log "Abriendo ${PORT}/tcp en el firewall del sistema"
+configure_network_access() {
+    log "Manteniendo ${PORT}/tcp cerrado al acceso público"
     if systemctl is-active --quiet firewalld; then
-        firewall-cmd --permanent --add-port="${PORT}/tcp"
+        firewall-cmd --permanent --remove-port="${PORT}/tcp" 2>/dev/null || true
         firewall-cmd --reload
         firewall-cmd --list-ports
     else
         printf 'firewalld no está activo.\n'
     fi
-    printf 'MANUAL: Security Group ECS -> inbound TCP %s -> tu IP/32.\n' "$PORT"
+    printf 'No agregues TCP %s al Security Group de ECS.\n' "$PORT"
+    printf 'Acceso recomendado desde tu equipo: ssh -N -L %s:127.0.0.1:%s root@IP_PUBLICA_ECS\n' "$PORT" "$PORT"
 }
 
 create_auth_config() {
@@ -347,7 +348,9 @@ finish() {
     printf 'Chat CLI: %s/jah_chat_cli.sh\n' "$DEPLOYMENT_DIR"
     printf 'Estado: systemctl status %s --no-pager -l\n' "$SERVICE_NAME"
     printf 'Logs: journalctl -u %s -n 100 --no-pager -l\n' "$SERVICE_NAME"
-    printf 'Recuerda abrir TCP %s en el Security Group de ECS.\n' "$PORT"
+    printf 'Security Group: mantén TCP %s cerrado.\n' "$PORT"
+    printf 'Túnel SSH: ssh -N -L %s:127.0.0.1:%s root@IP_PUBLICA_ECS\n' "$PORT" "$PORT"
+    printf 'Navegador local: http://127.0.0.1:%s/index.php\n' "$PORT"
 }
 
 main() {
@@ -357,7 +360,7 @@ main() {
     prepare_runtime
     validate_and_test
     install_service
-    open_firewall
+    configure_network_access
     run_live_demo
     create_cli
     show_evidence

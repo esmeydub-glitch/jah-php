@@ -27,6 +27,7 @@ __pycache__/
 .eggs/
 dist/
 build/
+/video_build_fresh/
 
 # Packaged archives
 *.tar.gz

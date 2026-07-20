@@ -226,7 +226,13 @@ chmod 755 deploy_alibaba_ecs.sh
 ./deploy_alibaba_ecs.sh
 ```
 
-The script never contains or prints either key. `.env` and all generated runtime evidence remain excluded from version control. Opening inbound TCP port 8000 in the ECS Security Group is intentionally manual because it belongs to the Alibaba Cloud account boundary.
+The script never contains or prints either key. `.env` and all generated runtime evidence remain excluded from version control. For the verified hackathon deployment, inbound TCP 8000 was deliberately left closed in the ECS Security Group. The interface was tested through an encrypted SSH tunnel instead:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 root@<ECS_PUBLIC_IP>
+```
+
+With the tunnel active, open `http://127.0.0.1:8000/index.php`. The local port is forwarded over SSH to the real ECS service; no application port, password, private key, or API key is made public. See [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md) for the complete deployment, verification, and tunnel procedure.
 
 ## API examples
 
