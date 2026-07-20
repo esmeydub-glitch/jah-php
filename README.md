@@ -204,12 +204,12 @@ The recommended deployment path is the included executable installer:
 
 It is designed for a clean **Alibaba Cloud Linux 3 ECS** instance and must be run as `root`. No Docker, Composer, Node.js, npm, Java, or external database is required.
 
-Install Git, clone the deployment branch, and run the script:
+Install Git, clone the public repository, and run the script:
 
 ```bash
 dnf install -y git
 cd /root
-git clone -b agent/alibaba-ecs-installer https://github.com/esmeydub/jah-php.git
+git clone https://github.com/esmeydub/jah-php.git
 cd /root/jah-php
 chmod 755 deploy_alibaba_ecs.sh
 ./deploy_alibaba_ecs.sh
@@ -226,7 +226,7 @@ The script performs the complete deployment sequence:
 7. Installs and enables `jah-memoryagent.service` with `systemd` on port 8000.
 8. Executes live status, Qwen, cross-session memory, retrieval, search, and SALK checks.
 9. Creates a secret-free report at `runtime/deployment/alibaba-ecs-proof.txt`.
-10. Prints the service, logs, local URL, and SSH tunnel commands needed after installation.
+10. Prints the service, logs, local URL, and the SSH tunnel command used for optional private validation.
 
 The credential prompts look like this; typed values are not displayed:
 
@@ -251,34 +251,36 @@ SUMMARY 18/18
 SUMMARY 7/7
 ```
 
-#### Secure access through an SSH tunnel
+#### Current public judging deployment
 
-Keep inbound TCP 8000 closed in the ECS Security Group and run this on the authorized workstation:
-
-```bash
-ssh -N -L 8000:127.0.0.1:8000 root@<ECS_PUBLIC_IP>
-```
-
-Then open `http://127.0.0.1:8000/index.php`. The local address is forwarded through encrypted SSH to the real ECS service. No SSH password, private key, Qwen key, or JAH key belongs in the repository.
-
-#### Temporary public judging access
-
-For hackathon judging only, TCP 8000 can be temporarily authorized in the ECS Security Group and the authenticated interface can be opened at:
+The hackathon judging deployment is currently available at:
 
 ```text
-http://<ECS_PUBLIC_IP>:8000/index.php
+http://47.77.201.239:8000/index.php
 ```
 
-Keep `JAH_API_KEY` enabled, share only a temporary judge key through Devpost's private testing instructions, and never share `QWEN_API_KEY`. Remove the public rule and rotate the judge key after judging.
+Inbound TCP 8000 is temporarily authorized in the Alibaba Cloud ECS Security Group for evaluation. The interface remains protected with `JAH_API_KEY`; the temporary judge key is provided only through Devpost's private testing instructions. `QWEN_API_KEY` remains on the server and is never sent to the browser.
 
-For complete deployment evidence and the detailed tunnel request path, see [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md).
+After judging, remove the public TCP 8000 rule and rotate the temporary judge key.
+
+#### Historical SSH tunnel used during private testing
+
+Before enabling the public judging endpoint, deployment validation and video recording used an SSH local-forward while port 8000 remained closed to the Internet:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 root@ECS_PUBLIC_IP
+```
+
+The tester then opened `http://127.0.0.1:8000/index.php`. That tunnel was used only for private testing and is not required for current judge access. No SSH password, private key, Qwen key, or JAH key belongs in the repository.
+
+For current deployment evidence and the historical tunnel explanation, see [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md).
 
 ### Manual local installation
 
 Clone the public repository:
 
 ```bash
-git clone -b agent/alibaba-ecs-installer https://github.com/esmeydub/jah-php.git
+git clone https://github.com/esmeydub/jah-php.git
 cd jah-php
 cp .env.example .env
 ```

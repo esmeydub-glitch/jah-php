@@ -32,12 +32,12 @@ The deployment was verified on Alibaba Cloud Linux 3 (OpenAnolis Edition), x86-6
 
 ## Automated ECS deployment
 
-On a clean Alibaba Cloud Linux 3 ECS instance, install Git, clone the deployment branch, and run the installer as root:
+On a clean Alibaba Cloud Linux 3 ECS instance, install Git, clone the public repository, and run the installer as root:
 
 ```bash
 dnf install -y git
 cd /root
-git clone -b agent/alibaba-ecs-installer https://github.com/esmeydub/jah-php.git
+git clone https://github.com/esmeydub/jah-php.git
 cd /root/jah-php
 chmod 755 deploy_alibaba_ecs.sh
 ./deploy_alibaba_ecs.sh
@@ -53,14 +53,33 @@ ss -ltnp | grep ':8000'
 cat /root/jah-php/runtime/deployment/alibaba-ecs-proof.txt
 ```
 
-## Secure test access through an SSH tunnel
+## Current public judging access
 
-Port 8000 was deliberately **not** added to the ECS Security Group. Only the existing SSH port is used. This keeps the PHP development server and the authenticated JAH interface off the public Internet while still allowing a judge or operator with SSH authorization to test the real ECS deployment.
+The judging deployment is currently available directly from the Alibaba Cloud ECS public IP:
+
+```text
+http://47.77.201.239:8000/index.php
+```
+
+Inbound TCP 8000 is temporarily authorized in the ECS Security Group for hackathon evaluation. The application remains protected by the server-side `JAH_API_KEY` login. The temporary judge key is shared only in Devpost's private testing instructions; it is not stored in this repository or exposed in the demo video. `QWEN_API_KEY` remains server-side at all times.
+
+The current request path is:
+
+```text
+Judge browser -> ECS public IP:8000 -> JAH_API_KEY login
+  -> jah-memoryagent.service -> Qwen Cloud over outbound HTTPS
+```
+
+After the judging period, the public port rule should be removed and the temporary judge key rotated.
+
+## Historical private validation through an SSH tunnel
+
+Before public judging access was enabled, the deployment was tested without opening inbound TCP 8000. An SSH local-forward was used from the authorized workstation:
 
 From the authorized test workstation, start local port forwarding:
 
 ```bash
-ssh -N -L 8000:127.0.0.1:8000 root@<ECS_PUBLIC_IP>
+ssh -N -L 8000:127.0.0.1:8000 root@ECS_PUBLIC_IP
 ```
 
 Then open:
@@ -69,7 +88,7 @@ Then open:
 http://127.0.0.1:8000/index.php
 ```
 
-The path is:
+The historical test path was:
 
 ```text
 Browser 127.0.0.1:8000
@@ -79,7 +98,7 @@ Browser 127.0.0.1:8000
   -> Qwen Cloud over outbound HTTPS
 ```
 
-`-N` tells SSH not to open a remote shell. `-L 8000:127.0.0.1:8000` maps port 8000 on the tester's own computer to port 8000 on the ECS loopback interface. The browser therefore uses a local URL, but every application request is processed by the real Alibaba Cloud backend. The SSH password or private key and both application API keys remain outside the repository and video.
+`-N` tells SSH not to open a remote shell. `-L 8000:127.0.0.1:8000` maps port 8000 on the tester's own computer to port 8000 on the ECS loopback interface. This tunnel was used only for private deployment validation and video recording; it is not the current judge access method. The SSH password or private key and both application API keys remain outside the repository and video.
 
 ## Deployment verification checklist
 
@@ -105,11 +124,12 @@ php tests/run.php
 php php_actionscript_php_doc/tests/run.php
 ```
 
-Verify the backend through the SSH tunnel from the authorized workstation:
+Verify the current public deployment from a client with the temporary judge key:
 
 ```bash
+PUBLIC_ENDPOINT='http://47.77.201.239:8000'
 curl -H "X-JAH-API-Key: $JAH_API_KEY" \
-  "http://127.0.0.1:8000/api.php?action=status"
+  "$PUBLIC_ENDPOINT/api.php?action=status"
 ```
 
 Verify Qwen and persistent memory:
@@ -120,7 +140,7 @@ curl -X POST \
   -d "action=chat" \
   -d "collection=deployment-proof" \
   -d "message=Remember that this backend is deployed on Alibaba Cloud" \
-  "http://127.0.0.1:8000/api.php"
+  "$PUBLIC_ENDPOINT/api.php"
 ```
 
 ## Submission links

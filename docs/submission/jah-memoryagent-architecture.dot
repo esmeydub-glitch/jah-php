@@ -43,7 +43,7 @@ digraph JAHMemoryAgent {
   connector [label="QwenConnector\nnative PHP cURL · HTTPS\nAPI key only in Authorization header"];
   qwen [label="Qwen Cloud\nqwen-max", color="#8cf400", penwidth=2.2];
 
-  user -> boundary [label="SSH tunnel to localhost:8000"];
+  user -> boundary [label="Public ECS endpoint :8000\nJAH_API_KEY login"];
   boundary -> salk [label="validated request"];
   salk -> runtime;
   runtime -> pyramid [label="classify / retrieve / store"];
