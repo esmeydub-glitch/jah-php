@@ -188,10 +188,89 @@ No Composer, Node.js, npm, Java, database server, or frontend build process is r
 
 ## Installation
 
+### Automated Alibaba Cloud ECS installation (`deploy_alibaba_ecs.sh`)
+
+The recommended deployment path is the included executable installer:
+
+- [`deploy_alibaba_ecs.sh`](deploy_alibaba_ecs.sh)
+
+It is designed for a clean **Alibaba Cloud Linux 3 ECS** instance and must be run as `root`. No Docker, Composer, Node.js, npm, Java, or external database is required.
+
+Install Git, clone the deployment branch, and run the script:
+
+```bash
+dnf install -y git
+cd /root
+git clone -b agent/alibaba-ecs-installer https://github.com/esmeydub/jah-php.git
+cd /root/jah-php
+chmod 755 deploy_alibaba_ecs.sh
+./deploy_alibaba_ecs.sh
+```
+
+The script performs the complete deployment sequence:
+
+1. Verifies `root`, Alibaba Cloud Linux 3, `dnf`, and the x86-64 environment.
+2. Installs Git, cURL, unzip, PHP 8.2, and the required PHP extensions.
+3. Requests `QWEN_API_KEY` and `JAH_API_KEY` using hidden terminal input.
+4. Writes both keys only to the ignored `.env` with mode `0600`; neither key is embedded in the script or committed to Git.
+5. Prepares persistent DataCoreTurbo, MemoryPyramid, session, audit, and deployment directories.
+6. Validates the PHP source and runs the complete `18/18` product suite and `7/7` ActionScript suite.
+7. Installs and enables `jah-memoryagent.service` with `systemd` on port 8000.
+8. Executes live status, Qwen, cross-session memory, retrieval, search, and SALK checks.
+9. Creates a secret-free report at `runtime/deployment/alibaba-ecs-proof.txt`.
+10. Prints the service, logs, local URL, and SSH tunnel commands needed after installation.
+
+The credential prompts look like this; typed values are not displayed:
+
+```text
+Pega tu QWEN_API_KEY (entrada oculta):
+Crea una JAH_API_KEY de al menos 16 caracteres (entrada oculta):
+```
+
+Verify the completed deployment:
+
+```bash
+systemctl status jah-memoryagent --no-pager -l
+ss -ltnp | grep ':8000'
+cat /root/jah-php/runtime/deployment/alibaba-ecs-proof.txt
+journalctl -u jah-memoryagent -n 100 --no-pager -l
+```
+
+Expected summaries in the generated proof:
+
+```text
+SUMMARY 18/18
+SUMMARY 7/7
+```
+
+#### Secure access through an SSH tunnel
+
+Keep inbound TCP 8000 closed in the ECS Security Group and run this on the authorized workstation:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 root@<ECS_PUBLIC_IP>
+```
+
+Then open `http://127.0.0.1:8000/index.php`. The local address is forwarded through encrypted SSH to the real ECS service. No SSH password, private key, Qwen key, or JAH key belongs in the repository.
+
+#### Temporary public judging access
+
+For hackathon judging only, TCP 8000 can be temporarily authorized in the ECS Security Group and the authenticated interface can be opened at:
+
+```text
+http://<ECS_PUBLIC_IP>:8000/index.php
+```
+
+Keep `JAH_API_KEY` enabled, share only a temporary judge key through Devpost's private testing instructions, and never share `QWEN_API_KEY`. Remove the public rule and rotate the judge key after judging.
+
+For complete deployment evidence and the detailed tunnel request path, see [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md).
+
+### Manual local installation
+
 Clone the public repository:
 
 ```bash
-git clone https://github.com/esmeydub/jah-php.git
+git clone -b agent/alibaba-ecs-installer https://github.com/esmeydub/jah-php.git
 cd jah-php
 cp .env.example .env
 ```
@@ -214,25 +293,6 @@ php -S 0.0.0.0:8000 -t public
 ```
 
 Open `http://localhost:8000/index.php`. When `JAH_API_KEY` is configured, the PHP interface presents a server-side login form. Without it, access is restricted to loopback clients.
-
-## Automated Alibaba Cloud ECS deployment
-
-On an Alibaba Cloud Linux 3 ECS instance, the included installer preserves the full verification flow while keeping credentials out of Git. It installs PHP 8.2, requests `QWEN_API_KEY` and `JAH_API_KEY` with hidden terminal input, runs both test suites, installs a `systemd` service on port 8000, exercises Qwen and cross-session memory, and writes a deployment proof report under the ignored `runtime/deployment/` directory.
-
-```bash
-git clone https://github.com/esmeydub/jah-php.git
-cd jah-php
-chmod 755 deploy_alibaba_ecs.sh
-./deploy_alibaba_ecs.sh
-```
-
-The script never contains or prints either key. `.env` and all generated runtime evidence remain excluded from version control. For the verified hackathon deployment, inbound TCP 8000 was deliberately left closed in the ECS Security Group. The interface was tested through an encrypted SSH tunnel instead:
-
-```bash
-ssh -N -L 8000:127.0.0.1:8000 root@<ECS_PUBLIC_IP>
-```
-
-With the tunnel active, open `http://127.0.0.1:8000/index.php`. The local port is forwarded over SSH to the real ECS service; no application port, password, private key, or API key is made public. See [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md) for the complete deployment, verification, and tunnel procedure.
 
 ## API examples
 
@@ -380,10 +440,13 @@ The index intentionally trades about 0.14 ms of additional write work per docume
 ## Alibaba Cloud and Qwen Cloud deployment
 
 - Qwen Cloud integration code: [`app/QwenConnector.php`](app/QwenConnector.php)
-- Public Alibaba Cloud proof: [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md)
+- Public Alibaba Cloud proof: [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md)
+- Automated ECS installer: [`deploy_alibaba_ecs.sh`](deploy_alibaba_ecs.sh)
+- Architecture diagram: [`docs/submission/jah-memoryagent-architecture-en.png`](docs/submission/jah-memoryagent-architecture-en.png)
+- Deployment screenshot: [`docs/submission/alibaba-ecs-deployment-proof.png`](docs/submission/alibaba-ecs-deployment-proof.png)
 - Backend deployment target: Alibaba Cloud compute with Qwen Cloud inference.
 
-The public Alibaba Cloud proof is [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md), with the service/API implementation in [`app/QwenConnector.php`](app/QwenConnector.php). Do not commit or expose cloud credentials.
+The public Alibaba Cloud proof is [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md), with the service/API implementation in [`app/QwenConnector.php`](app/QwenConnector.php). Do not commit or expose cloud credentials.
 
 ## Hackathon submission
 
@@ -392,17 +455,20 @@ The public Alibaba Cloud proof is [ALIBABA_CLOUD_PROOF.md](https://raw.githubuse
 | Track identified as **Track 1: MemoryAgent** | Complete |
 | Public source repository | Complete — [github.com/esmeydub/jah-php](https://github.com/esmeydub/jah-php) |
 | Detectable open-source license | Complete — [MIT License](LICENSE) |
-| Architecture diagram | Complete — included above |
+| Architecture diagram | Complete — [English PNG](docs/submission/jah-memoryagent-architecture-en.png) and diagram above |
 | Text description and feature explanation | Complete — included above |
 | Alibaba Cloud integration code | Complete — [`QwenConnector.php`](app/QwenConnector.php) |
-| Public Alibaba Cloud proof | Complete — [ALIBABA_CLOUD_PROOF.md](https://raw.githubusercontent.com/esmeydub/jah-php/main/ALIBABA_CLOUD_PROOF.md) |
+| Public Alibaba Cloud proof | Complete — [`ALIBABA_CLOUD_PROOF.md`](ALIBABA_CLOUD_PROOF.md) |
 | Alibaba Cloud service/API code | Complete — [`app/QwenConnector.php`](app/QwenConnector.php) |
-| Approximately three-minute public demo video | **Add YouTube, Vimeo, or Facebook Video URL before submission** |
+| Automated Alibaba ECS installer | Complete — [`deploy_alibaba_ecs.sh`](deploy_alibaba_ecs.sh) |
+| Alibaba ECS deployment screenshot | Complete — [public PNG](docs/submission/alibaba-ecs-deployment-proof.png) |
+| Public judging endpoint | Complete — [JAH MemoryAgent on Alibaba ECS](http://47.77.201.239:8000/index.php) |
+| Approximately three-minute public demo video | Complete — [YouTube](https://youtu.be/3H8MfxC-SFY) |
 | Optional public build journey post | Optional Blog Post Award entry |
 
 ### Demo video
 
-Not supplied yet. A public YouTube, Vimeo, or Facebook Video URL is required before submission.
+[JAH MemoryAgent — Qwen Cloud and Alibaba ECS demo (2:58)](https://youtu.be/3H8MfxC-SFY)
 
 ## Suggested three-minute demo
 
